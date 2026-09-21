@@ -7,9 +7,10 @@ import { RulesGuideModal } from './components/RulesGuideModal';
 import { SavedStatementsPanel } from './components/SavedStatementsPanel';
 import { SaveStatementModal } from './components/SaveStatementModal';
 import { ReopenConfirmModal } from './components/ReopenConfirmModal';
-import { Transaction, CategoryType, CategorySummary, CreditOverrides, SavedStatement } from './types';
+import { RemainingBalanceModal } from './components/RemainingBalanceModal';
+import { Transaction, CategoryType, CategorySummary, CreditOverrides, SavedStatement, RemainingBalances } from './types';
 import { parseCSVData, getSampleCSVString, exportTransactionsToCSV, exportSummariesToCSV, formatCurrency } from './utils/csvHelper';
-import { calculateStatementTotals, calculateCarriedOverTotals } from './utils/statementHelper';
+import { calculateStatementTotals, calculateCarriedOverTotals, getRemainingBalances, saveRemainingBalances, clearRemainingBalances } from './utils/statementHelper';
 import {
   applyDeletedSignatures,
   saveDeletedSignature,
@@ -35,6 +36,7 @@ import {
   X,
   FileText,
   Layers,
+  Scale,
 } from 'lucide-react';
 
 const STORAGE_KEY = 'credit_card_analyzer_transactions';
@@ -69,6 +71,8 @@ export default function App() {
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [statementToReopen, setStatementToReopen] = useState<SavedStatement | null>(null);
+  const [isRemainingBalanceModalOpen, setIsRemainingBalanceModalOpen] = useState(false);
+  const [remainingBalances, setRemainingBalances] = useState<RemainingBalances>(() => getRemainingBalances());
 
   // Saved Statements State (persisted across sessions and imports)
   const [savedStatements, setSavedStatements] = useState<SavedStatement[]>(() => {
@@ -198,6 +202,61 @@ export default function App() {
   const carriedOverTotals = useMemo(() => {
     return calculateCarriedOverTotals(savedStatements);
   }, [savedStatements]);
+
+  // Check if active persistent remaining cutoff balances are configured
+  const hasRemainingBalances = Boolean(
+    remainingBalances?.enabled &&
+      ((remainingBalances.Andrew || 0) !== 0 ||
+        (remainingBalances.Rachel || 0) !== 0 ||
+        (remainingBalances.Leisure || 0) !== 0)
+  );
+
+  const totalRemaining = hasRemainingBalances
+    ? Math.round(
+        ((remainingBalances?.Andrew || 0) +
+          (remainingBalances?.Rachel || 0) +
+          (remainingBalances?.Leisure || 0)) *
+          100
+      ) / 100
+    : 0;
+
+  // Compute combined net numbers for the Remaining Balance snapshot filler
+  const currentNetByBucket = useMemo(() => {
+    return {
+      Andrew: Math.round((activeTotals.andrew.netSpend + carriedOverTotals.andrew.netSpend) * 100) / 100,
+      Rachel: Math.round((activeTotals.rachel.netSpend + carriedOverTotals.rachel.netSpend) * 100) / 100,
+      Leisure: Math.round((activeTotals.leisure.netSpend + carriedOverTotals.leisure.netSpend) * 100) / 100,
+      total: Math.round((activeTotals.totalNetSpend + carriedOverTotals.totalNetSpend) * 100) / 100,
+    };
+  }, [activeTotals, carriedOverTotals]);
+
+  const handleSaveRemainingBalances = (
+    newBalances: RemainingBalances,
+    options: { clearSavedStatements: boolean; clearActiveTransactions: boolean }
+  ) => {
+    saveRemainingBalances(newBalances);
+    setRemainingBalances(newBalances);
+
+    if (options.clearSavedStatements) {
+      localStorage.removeItem(SAVED_STATEMENTS_KEY);
+      setSavedStatements([]);
+    }
+    if (options.clearActiveTransactions) {
+      setTransactions([]);
+      localStorage.removeItem(STORAGE_KEY);
+      clearManualOverrides();
+      clearCreditOverrides();
+      setCreditOverrides({});
+    }
+
+    showToast('Remaining balances and cutoff baseline saved successfully!');
+  };
+
+  const handleClearRemainingBalances = () => {
+    clearRemainingBalances();
+    setRemainingBalances(getRemainingBalances());
+    showToast('Remaining cutoff balances cleared.');
+  };
 
   // Handle updates to custom credit allocations
   // When manually overriding amounts in the Leisure category, add or subtract from Andrew/Natalie to ensure the amounts stay in sync.
@@ -766,6 +825,8 @@ export default function App() {
         savedStatementsCount={savedStatements.length}
         onSaveCurrentStatement={transactions.length > 0 ? handleOpenSaveModal : undefined}
         onScrollToSavedStatements={savedStatements.length > 0 ? handleScrollToSavedStatements : undefined}
+        onOpenRemainingBalanceModal={() => setIsRemainingBalanceModalOpen(true)}
+        hasRemainingBalances={hasRemainingBalances}
       />
 
       {/* Main Content Container (Import Statement section removed from top as requested) */}
@@ -783,12 +844,14 @@ export default function App() {
             onSaveCurrentStatement={handleOpenSaveModal}
             activeTransactionCount={activeTransactionsCount}
             onRenameStatement={handleRenameSavedStatement}
+            remainingBalances={remainingBalances}
+            onOpenRemainingBalanceModal={() => setIsRemainingBalanceModalOpen(true)}
           />
         </div>
 
         {/* 2. Transaction Table with Row Category Dropdowns & Quick Batch Actions */}
         <div id="transactions-ledger" className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
                 Transactions Ledger
@@ -796,6 +859,21 @@ export default function App() {
               <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
                 {activeTransactionsCount} Records
               </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setIsRemainingBalanceModalOpen(true)}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-2xs active:scale-95 ${
+                  hasRemainingBalances
+                    ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                    : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 border-purple-200 dark:border-purple-800/80'
+                }`}
+                title="Store or adjust starting Remaining Balance cutoff baseline across Andrew, Rachel, and Leisure"
+              >
+                <Scale className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>{hasRemainingBalances ? `Remaining Cutoff (${formatCurrency(totalRemaining)})` : 'Remaining Balance'}</span>
+              </button>
             </div>
           </div>
 
@@ -830,6 +908,8 @@ export default function App() {
             onSelectCategoryFilter={(cat) => setSelectedCategoryFilter(cat)}
             savedStatements={savedStatements}
             activeStatementName={activeStatementName}
+            remainingBalances={remainingBalances}
+            onOpenRemainingBalanceModal={() => setIsRemainingBalanceModalOpen(true)}
           />
         </div>
 
@@ -846,6 +926,19 @@ export default function App() {
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
               {savedStatements.length} Saved Statement{savedStatements.length === 1 ? '' : 's'}
             </span>
+            <span>•</span>
+            <button
+              type="button"
+              onClick={() => setIsRemainingBalanceModalOpen(true)}
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold border transition-colors cursor-pointer ${
+                hasRemainingBalances
+                  ? 'bg-purple-100 dark:bg-purple-950/70 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700 hover:bg-purple-200'
+                  : 'bg-slate-100 dark:bg-slate-800 text-purple-700 dark:text-purple-300 border-slate-200 dark:border-slate-700 hover:border-purple-300'
+              }`}
+            >
+              <Scale className="w-3 h-3 text-purple-600 dark:text-purple-400" />
+              <span>{hasRemainingBalances ? `Cutoff Active: ${formatCurrency(totalRemaining)}` : 'Set Remaining Balance'}</span>
+            </button>
           </div>
 
           {(transactions.length > 0 || savedStatements.length > 0) && (
@@ -997,6 +1090,18 @@ export default function App() {
         isOpen={isRulesModalOpen}
         onClose={() => setIsRulesModalOpen(false)}
         onReapplyDefaults={handleResetToDefaultRules}
+      />
+
+      {/* Remaining Balance & Statement Cutoff Modal */}
+      <RemainingBalanceModal
+        isOpen={isRemainingBalanceModalOpen}
+        onClose={() => setIsRemainingBalanceModalOpen(false)}
+        currentBalances={remainingBalances}
+        onSave={handleSaveRemainingBalances}
+        onClear={handleClearRemainingBalances}
+        currentNetByBucket={currentNetByBucket}
+        savedStatementCount={savedStatements.length}
+        activeTransactionCount={transactions.length}
       />
     </div>
   );

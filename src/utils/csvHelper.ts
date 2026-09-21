@@ -204,35 +204,50 @@ export function exportSummariesToCSV(
   filename = 'category_spending_summary.csv'
 ) {
   const totalAllocated = summaries.reduce((acc, curr) => acc + (curr.allocatedCredit ?? curr.totalCredit), 0);
+  const hasRemaining = summaries.some((s) => s.remainingBalance !== undefined && s.remainingBalance !== 0);
 
-  const summaryRows: Array<{
-    'Category': string;
-    'Transaction Count': number;
-    'Gross Charges ($)': string;
-    'Credits Applied ($)': string;
-    'Credit Source': string;
-    'Net Spending ($)': string;
-    '% of Total Spend': string;
-  }> = summaries.map((s) => ({
-    'Category': s.category === 'Andrew' ? 'Andrew/Natalie' : s.category,
-    'Transaction Count': s.count,
-    'Gross Charges ($)': s.totalDebit.toFixed(2),
-    'Credits Applied ($)': (s.allocatedCredit ?? s.totalCredit).toFixed(2),
-    'Credit Source': s.isCreditOverridden ? 'Manual Override' : 'Auto from Transactions',
-    'Net Spending ($)': s.netSpend.toFixed(2),
-    '% of Total Spend': `${s.percentage.toFixed(1)}%`,
-  }));
+  const summaryRows = summaries.map((s) => {
+    const row: Record<string, string | number> = {
+      'Category': s.category === 'Andrew' ? 'Andrew/Natalie' : s.category,
+      'Transaction Count': s.count,
+      'Gross Charges ($)': s.totalDebit.toFixed(2),
+      'Credits Applied ($)': (s.allocatedCredit ?? s.totalCredit).toFixed(2),
+      'Credit Source': s.isCreditOverridden ? 'Manual Override' : 'Auto from Transactions',
+    };
+
+    if (hasRemaining) {
+      row['Remaining Cutoff Balance ($)'] = (s.remainingBalance || 0).toFixed(2);
+      row['Statement Net ($)'] = (s.statementNet ?? (s.totalDebit - (s.allocatedCredit ?? s.totalCredit))).toFixed(2);
+      row['Total Balance Due ($)'] = (s.totalBalance ?? s.netSpend).toFixed(2);
+    } else {
+      row['Net Spending ($)'] = s.netSpend.toFixed(2);
+    }
+
+    row['% of Total Spend'] = `${s.percentage.toFixed(1)}%`;
+    return row;
+  });
 
   // Append Total Row
-  summaryRows.push({
+  const totalRow: Record<string, string | number> = {
     'Category': 'TOTAL / ALL',
     'Transaction Count': summaries.reduce((acc, curr) => acc + curr.count, 0),
     'Gross Charges ($)': totalDebit.toFixed(2),
     'Credits Applied ($)': totalAllocated.toFixed(2),
     'Credit Source': 'Total',
-    'Net Spending ($)': totalNet.toFixed(2),
-    '% of Total Spend': '100.0%',
-  });
+  };
+
+  if (hasRemaining) {
+    const totalRem = summaries.reduce((acc, curr) => acc + (curr.remainingBalance || 0), 0);
+    const totalStmtNet = totalDebit - totalAllocated;
+    totalRow['Remaining Cutoff Balance ($)'] = totalRem.toFixed(2);
+    totalRow['Statement Net ($)'] = totalStmtNet.toFixed(2);
+    totalRow['Total Balance Due ($)'] = totalNet.toFixed(2);
+  } else {
+    totalRow['Net Spending ($)'] = totalNet.toFixed(2);
+  }
+
+  totalRow['% of Total Spend'] = '100.0%';
+  summaryRows.push(totalRow);
 
   const csv = Papa.unparse(summaryRows);
   downloadBlob(csv, filename, 'text/csv;charset=utf-8;');

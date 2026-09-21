@@ -14,6 +14,7 @@ import {
   Trash2,
   BookmarkCheck,
   Upload,
+  Scale,
 } from 'lucide-react';
 
 interface NavbarProps {
@@ -29,6 +30,8 @@ interface NavbarProps {
   savedStatementsCount?: number;
   onSaveCurrentStatement?: () => void;
   onScrollToSavedStatements?: () => void;
+  onOpenRemainingBalanceModal?: () => void;
+  hasRemainingBalances?: boolean;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -44,6 +47,8 @@ export const Navbar: React.FC<NavbarProps> = ({
   savedStatementsCount = 0,
   onSaveCurrentStatement,
   onScrollToSavedStatements,
+  onOpenRemainingBalanceModal,
+  hasRemainingBalances = false,
 }) => {
   return (
     <header className="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-colors">
@@ -87,6 +92,27 @@ export const Navbar: React.FC<NavbarProps> = ({
             <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
             <span className="hidden md:inline">Rules Guide</span>
           </button>
+
+          {/* Remaining Balance Cutoff Button */}
+          {onOpenRemainingBalanceModal && (
+            <button
+              type="button"
+              onClick={onOpenRemainingBalanceModal}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-xs active:scale-95 ${
+                hasRemainingBalances
+                  ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 hover:border-purple-300 dark:hover:border-purple-700 border-purple-200 dark:border-purple-800/80'
+              }`}
+              title="Store or adjust persistent Remaining Balance cutoff values for each bucket"
+            >
+              <Scale className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+              <span className="hidden sm:inline">Remaining Balance</span>
+              <span className="sm:hidden">Rem. Balance</span>
+              {hasRemainingBalances && (
+                <span className="w-2 h-2 rounded-full bg-purple-600 dark:bg-purple-400 animate-pulse" />
+              )}
+            </button>
+          )}
 
           {/* Quick Demo Loader */}
           {transactionCount === 0 && (

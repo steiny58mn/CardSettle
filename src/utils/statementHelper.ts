@@ -1,7 +1,17 @@
-import { CreditOverrides, SavedStatement, SavedStatementTotals, Transaction } from '../types';
+import { CreditOverrides, RemainingBalances, SavedStatement, SavedStatementTotals, Transaction } from '../types';
 
 export const SAVED_STATEMENTS_KEY = 'credit_card_analyzer_saved_statements';
 export const ACTIVE_STATEMENT_NAME_KEY = 'credit_card_analyzer_active_statement_name';
+export const REMAINING_BALANCES_KEY = 'credit_card_analyzer_remaining_balances';
+
+export const DEFAULT_REMAINING_BALANCES: RemainingBalances = {
+  Andrew: 0,
+  Rachel: 0,
+  Leisure: 0,
+  enabled: false,
+  asOfDate: '',
+  notes: '',
+};
 
 /**
  * Calculates bucket-by-bucket and overall totals for a set of transactions and overrides.
@@ -272,5 +282,52 @@ export function saveActiveStatementName(name: string): void {
     localStorage.setItem(ACTIVE_STATEMENT_NAME_KEY, name);
   } catch (e) {
     console.warn('Error saving active statement name:', e);
+  }
+}
+
+/**
+ * Loads stored Remaining Balances (per-bucket starting cutoff balances) from localStorage
+ */
+export function getRemainingBalances(): RemainingBalances {
+  try {
+    const raw = localStorage.getItem(REMAINING_BALANCES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          Andrew: typeof parsed.Andrew === 'number' && !isNaN(parsed.Andrew) ? parsed.Andrew : 0,
+          Rachel: typeof parsed.Rachel === 'number' && !isNaN(parsed.Rachel) ? parsed.Rachel : 0,
+          Leisure: typeof parsed.Leisure === 'number' && !isNaN(parsed.Leisure) ? parsed.Leisure : 0,
+          enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : true,
+          asOfDate: typeof parsed.asOfDate === 'string' ? parsed.asOfDate : '',
+          notes: typeof parsed.notes === 'string' ? parsed.notes : '',
+        };
+      }
+    }
+  } catch (e) {
+    console.warn('Error reading remaining balances from localStorage:', e);
+  }
+  return { ...DEFAULT_REMAINING_BALANCES };
+}
+
+/**
+ * Saves Remaining Balances to localStorage
+ */
+export function saveRemainingBalances(balances: RemainingBalances): void {
+  try {
+    localStorage.setItem(REMAINING_BALANCES_KEY, JSON.stringify(balances));
+  } catch (e) {
+    console.warn('Error saving remaining balances to localStorage:', e);
+  }
+}
+
+/**
+ * Clears Remaining Balances from localStorage
+ */
+export function clearRemainingBalances(): void {
+  try {
+    localStorage.removeItem(REMAINING_BALANCES_KEY);
+  } catch (e) {
+    console.warn('Error clearing remaining balances from localStorage:', e);
   }
 }

@@ -16,8 +16,9 @@ import {
   AlertCircle,
   Check,
   X,
+  Scale,
 } from 'lucide-react';
-import { SavedStatement, SavedStatementTotals } from '../types';
+import { RemainingBalances, SavedStatement, SavedStatementTotals } from '../types';
 import { formatCurrency, exportTransactionsToCSV } from '../utils/csvHelper';
 
 interface SavedStatementsPanelProps {
@@ -31,6 +32,8 @@ interface SavedStatementsPanelProps {
   onSaveCurrentStatement: () => void;
   activeTransactionCount: number;
   onRenameStatement?: (statementId: string, newName: string) => void;
+  remainingBalances?: RemainingBalances;
+  onOpenRemainingBalanceModal?: () => void;
 }
 
 export const SavedStatementsPanel: React.FC<SavedStatementsPanelProps> = ({
@@ -44,6 +47,8 @@ export const SavedStatementsPanel: React.FC<SavedStatementsPanelProps> = ({
   onSaveCurrentStatement,
   activeTransactionCount,
   onRenameStatement,
+  remainingBalances,
+  onOpenRemainingBalanceModal,
 }) => {
   const [isExpanded, setIsExpanded] = useState(true);
   const [expandedStatementId, setExpandedStatementId] = useState<string | null>(null);
@@ -52,11 +57,27 @@ export const SavedStatementsPanel: React.FC<SavedStatementsPanelProps> = ({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [isConfirmingClearAll, setIsConfirmingClearAll] = useState(false);
 
-  if (savedStatements.length === 0 && activeTransactionCount === 0) {
+  const hasRemainingBalances = Boolean(
+    remainingBalances?.enabled &&
+      ((remainingBalances.Andrew || 0) !== 0 ||
+        (remainingBalances.Rachel || 0) !== 0 ||
+        (remainingBalances.Leisure || 0) !== 0)
+  );
+  const totalRemaining = hasRemainingBalances
+    ? Math.round(
+        ((remainingBalances?.Andrew || 0) +
+          (remainingBalances?.Rachel || 0) +
+          (remainingBalances?.Leisure || 0)) *
+          100
+      ) / 100
+    : 0;
+
+  if (savedStatements.length === 0 && activeTransactionCount === 0 && !hasRemainingBalances) {
     return null;
   }
 
   const grandTotal = activeTotals.totalNetSpend + carriedOverTotals.totalNetSpend;
+  const effectiveGrandTotal = Math.round((grandTotal + totalRemaining) * 100) / 100;
 
   const handleStartRename = (id: string, currentName: string) => {
     setEditingId(id);
@@ -101,11 +122,27 @@ export const SavedStatementsPanel: React.FC<SavedStatementsPanelProps> = ({
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-center">
+          {onOpenRemainingBalanceModal && (
+            <button
+              type="button"
+              onClick={onOpenRemainingBalanceModal}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all shadow-xs active:scale-95 cursor-pointer ${
+                hasRemainingBalances
+                  ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                  : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700'
+              }`}
+              title="Store persistent Remaining Balance cutoff values for each bucket to stop loading statements perpetually"
+            >
+              <Scale className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+              <span>{hasRemainingBalances ? `Cutoff Active (${formatCurrency(totalRemaining)})` : 'Remaining Balance'}</span>
+            </button>
+          )}
+
           {activeTransactionCount > 0 && (
             <button
               type="button"
               onClick={onSaveCurrentStatement}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs active:scale-95"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white transition-all shadow-xs active:scale-95 cursor-pointer"
               title="Save current active workspace statement & carry forward totals"
             >
               <CheckCircle2 className="w-3.5 h-3.5" />
@@ -126,6 +163,46 @@ export const SavedStatementsPanel: React.FC<SavedStatementsPanelProps> = ({
 
       {isExpanded && (
         <div className="p-4 sm:p-5 space-y-4">
+          {/* Remaining Balance Cutoff Active Banner */}
+          {hasRemainingBalances && (
+            <div className="p-3.5 rounded-xl bg-purple-50/90 dark:bg-purple-950/40 border border-purple-200 dark:border-purple-800/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 rounded-lg bg-purple-600 text-white shrink-0 shadow-xs">
+                  <Scale className="w-4 h-4" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-purple-950 dark:text-purple-200">
+                      Remaining Balance Cutoff Active:
+                    </span>
+                    <span className="font-extrabold text-purple-700 dark:text-purple-300">
+                      {formatCurrency(totalRemaining)} Total
+                    </span>
+                    {remainingBalances?.asOfDate && (
+                      <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                        (As of {remainingBalances.asOfDate})
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-purple-900/80 dark:text-purple-300/80 flex items-center flex-wrap gap-3 mt-0.5">
+                    <span>Andrew/Natalie: <strong>{formatCurrency(remainingBalances?.Andrew || 0)}</strong></span>
+                    <span>Rachel: <strong>{formatCurrency(remainingBalances?.Rachel || 0)}</strong></span>
+                    <span>Leisure: <strong>{formatCurrency(remainingBalances?.Leisure || 0)}</strong></span>
+                  </div>
+                </div>
+              </div>
+              {onOpenRemainingBalanceModal && (
+                <button
+                  type="button"
+                  onClick={onOpenRemainingBalanceModal}
+                  className="self-start sm:self-auto px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-slate-700 border border-purple-200 dark:border-purple-700 transition-colors cursor-pointer shadow-2xs"
+                >
+                  Adjust Cutoff
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Top Summary Grid */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             {/* Active Statement Card */}
@@ -184,11 +261,15 @@ export const SavedStatementsPanel: React.FC<SavedStatementsPanelProps> = ({
                 </span>
               </div>
               <div className="text-2xl font-black text-white">
-                {formatCurrency(grandTotal)}
+                {formatCurrency(effectiveGrandTotal)}
               </div>
               <div className="flex items-center justify-between text-xs pt-2 border-t border-white/10 text-indigo-200">
                 <span>Active ({formatCurrency(activeTotals.totalNetSpend)})</span>
-                <span>+ Carried ({formatCurrency(carriedOverTotals.totalNetSpend)})</span>
+                {hasRemainingBalances ? (
+                  <span>+ Carried &amp; Cutoff ({formatCurrency(carriedOverTotals.totalNetSpend + totalRemaining)})</span>
+                ) : (
+                  <span>+ Carried ({formatCurrency(carriedOverTotals.totalNetSpend)})</span>
+                )}
               </div>
             </div>
           </div>
