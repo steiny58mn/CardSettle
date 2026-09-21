@@ -215,6 +215,8 @@ export const RemainingBalanceModal: React.FC<RemainingBalanceModalProps> = ({
                     type="text"
                     value={andrewInput}
                     onChange={(e) => handleInputChange(setAndrewInput, e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     placeholder="0.00"
                     className="w-full pl-6 pr-3 py-1.5 text-sm font-bold rounded-lg bg-white dark:bg-slate-800 border border-purple-300 dark:border-purple-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
                   />
@@ -237,6 +239,8 @@ export const RemainingBalanceModal: React.FC<RemainingBalanceModalProps> = ({
                     type="text"
                     value={rachelInput}
                     onChange={(e) => handleInputChange(setRachelInput, e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     placeholder="0.00"
                     className="w-full pl-6 pr-3 py-1.5 text-sm font-bold rounded-lg bg-white dark:bg-slate-800 border border-pink-300 dark:border-pink-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-pink-500"
                   />
@@ -259,6 +263,8 @@ export const RemainingBalanceModal: React.FC<RemainingBalanceModalProps> = ({
                     type="text"
                     value={leisureInput}
                     onChange={(e) => handleInputChange(setLeisureInput, e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
                     placeholder="0.00"
                     className="w-full pl-6 pr-3 py-1.5 text-sm font-bold rounded-lg bg-white dark:bg-slate-800 border border-sky-300 dark:border-sky-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-sky-500"
                   />
@@ -288,6 +294,8 @@ export const RemainingBalanceModal: React.FC<RemainingBalanceModalProps> = ({
                 type="text"
                 value={asOfDate}
                 onChange={(e) => setAsOfDate(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
                 placeholder="e.g. As of Aug 31, 2026"
                 className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
               />
@@ -301,6 +309,8 @@ export const RemainingBalanceModal: React.FC<RemainingBalanceModalProps> = ({
                 type="text"
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onClick={(e) => (e.target as HTMLInputElement).select()}
                 placeholder="e.g. Settled prior statements via Venmo"
                 className="w-full px-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-none"
               />

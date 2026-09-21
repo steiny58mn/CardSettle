@@ -29,20 +29,31 @@ import {
   AlertCircle,
   AlertTriangle,
 } from 'lucide-react';
-import { CategoryType, Transaction } from '../types';
+import { CategoryType, Transaction, isManualTransaction } from '../types';
 import { formatCurrency } from '../utils/csvHelper';
 import { isPaymentOrCredit } from '../utils/rulesEngine';
 
 const RAW_CATEGORY_PALETTES: Record<string, string> = {
-  merchandise: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
-  dining: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-  travel: 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
-  entertainment: 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
-  groceries: 'bg-lime-50 dark:bg-lime-950/60 text-lime-700 dark:text-lime-300 border-lime-200 dark:border-lime-800',
-  gasoline: 'bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800',
-  healthcare: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
-  payment: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+  'gas/automotive': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  'gas / automotive': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  'automotive': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  'grocery': 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+  'groceries': 'bg-lime-50 dark:bg-lime-950/60 text-lime-700 dark:text-lime-300 border-lime-200 dark:border-lime-800',
+  'merchandise': 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
+  'dining': 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+  'entertainment': 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+  'other services': 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
+  'services': 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
+  'other travel': 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+  'travel': 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+  'gasoline': 'bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+  'payment': 'bg-lime-50 dark:bg-lime-950/60 text-lime-700 dark:text-lime-300 border-lime-200 dark:border-lime-800',
+  'fee': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
   'fee/interest charge': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+  'interest charge': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+  'healthcare': 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800',
+  'phone/cable': 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
+  'other': 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
 };
 
 const DYNAMIC_PALETTES = [
@@ -86,6 +97,8 @@ interface TransactionTableProps {
   onDeleteBulkTransactions: (ids: string[]) => void;
   onUndeleteTransaction: (id: string) => void;
   onUndeleteBulkTransactions: (ids: string[]) => void;
+  onPermanentDeleteTransaction?: (id: string) => void;
+  onPermanentDeleteBulkTransactions?: (ids: string[]) => void;
   onAddTransaction: (newTx: Omit<Transaction, 'id'>) => void;
   onResetToDefaultRules: () => void;
   onClearAll?: () => void;
@@ -104,6 +117,8 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   onDeleteBulkTransactions,
   onUndeleteTransaction,
   onUndeleteBulkTransactions,
+  onPermanentDeleteTransaction,
+  onPermanentDeleteBulkTransactions,
   onAddTransaction,
   onResetToDefaultRules,
   onClearAll,
@@ -130,10 +145,9 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   // Modal State for adding new transaction
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [newDate, setNewDate] = useState(new Date().toISOString().split('T')[0]);
-  const [newCard, setNewCard] = useState('3810');
   const [newDescription, setNewDescription] = useState('');
-  const [newDebit, setNewDebit] = useState('');
-  const [newCredit, setNewCredit] = useState('');
+  const [newType, setNewType] = useState<'DEBIT' | 'CREDIT'>('DEBIT');
+  const [newAmount, setNewAmount] = useState('');
   const [newCategory, setNewCategory] = useState<CategoryType>('Rachel');
 
   // Counts of deleted and active transactions
@@ -192,6 +206,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
         return true;
       })
       .sort((a, b) => {
+        // Organize payments/credits to the bottom of the list
+        const aIsCredit = isPaymentOrCredit(a);
+        const bIsCredit = isPaymentOrCredit(b);
+
+        if (!aIsCredit && bIsCredit) return -1;
+        if (aIsCredit && !bIsCredit) return 1;
+
         let comp = 0;
         if (sortBy === 'category') {
           const rankA = CATEGORY_ORDER[a.category] || 99;
@@ -283,36 +304,158 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
     }
   };
 
+  const selectedDeletedManualIds = useMemo(() => {
+    return selectedDeletedIds.filter((id) => {
+      const tx = transactions.find((t) => t.id === id);
+      return tx && isManualTransaction(tx);
+    });
+  }, [selectedDeletedIds, transactions]);
+
+  const deletedManualCount = useMemo(() => {
+    return transactions.filter((t) => t.isDeleted && isManualTransaction(t)).length;
+  }, [transactions]);
+
   const handleBulkUndelete = () => {
     if (selectedDeletedIds.length === 0) return;
     onUndeleteBulkTransactions(selectedDeletedIds);
     setSelectedIds(new Set());
   };
 
+  // Permanent Delete Confirmation Modal State
+  const [permanentDeleteConfirm, setPermanentDeleteConfirm] = useState<{
+    isOpen: boolean;
+    ids: string[];
+    title: string;
+    subtitle?: string;
+    items: Array<{
+      id: string;
+      description: string;
+      amount: number;
+      isCredit: boolean;
+      date: string;
+      category: CategoryType;
+    }>;
+  } | null>(null);
+
+  const handlePromptPermanentDeleteRow = (tx: Transaction) => {
+    setPermanentDeleteConfirm({
+      isOpen: true,
+      ids: [tx.id],
+      title: 'Permanently Delete Manual Transaction?',
+      subtitle: 'This manual record will be permanently deleted from your workspace.',
+      items: [
+        {
+          id: tx.id,
+          description: tx.description,
+          amount: tx.credit > 0 ? tx.credit : tx.debit,
+          isCredit: tx.credit > 0,
+          date: tx.transactionDate || tx.postedDate || '—',
+          category: tx.category,
+        },
+      ],
+    });
+  };
+
+  const handlePromptBulkPermanentDelete = () => {
+    if (selectedDeletedManualIds.length === 0) return;
+    const targetItems = transactions
+      .filter((t) => selectedDeletedManualIds.includes(t.id))
+      .map((t) => ({
+        id: t.id,
+        description: t.description,
+        amount: t.credit > 0 ? t.credit : t.debit,
+        isCredit: t.credit > 0,
+        date: t.transactionDate || t.postedDate || '—',
+        category: t.category,
+      }));
+
+    setPermanentDeleteConfirm({
+      isOpen: true,
+      ids: selectedDeletedManualIds,
+      title: `Permanently Delete ${selectedDeletedManualIds.length} Manual Transactions?`,
+      subtitle: `All ${selectedDeletedManualIds.length} selected manual records will be permanently removed.`,
+      items: targetItems,
+    });
+  };
+
+  const handlePromptPurgeAllManual = () => {
+    const deletedManuals = transactions.filter((t) => t.isDeleted && isManualTransaction(t));
+    if (deletedManuals.length === 0) return;
+
+    setPermanentDeleteConfirm({
+      isOpen: true,
+      ids: deletedManuals.map((t) => t.id),
+      title: `Purge All ${deletedManuals.length} Deleted Manual Transactions?`,
+      subtitle: 'Every deleted manual transaction will be permanently removed from your workspace.',
+      items: deletedManuals.map((t) => ({
+        id: t.id,
+        description: t.description,
+        amount: t.credit > 0 ? t.credit : t.debit,
+        isCredit: t.credit > 0,
+        date: t.transactionDate || t.postedDate || '—',
+        category: t.category,
+      })),
+    });
+  };
+
+  const handleConfirmPermanentDelete = () => {
+    if (!permanentDeleteConfirm || permanentDeleteConfirm.ids.length === 0) return;
+
+    if (permanentDeleteConfirm.ids.length === 1) {
+      onPermanentDeleteTransaction?.(permanentDeleteConfirm.ids[0]);
+    } else {
+      onPermanentDeleteBulkTransactions?.(permanentDeleteConfirm.ids);
+    }
+
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      permanentDeleteConfirm.ids.forEach((id) => next.delete(id));
+      return next;
+    });
+
+    setPermanentDeleteConfirm(null);
+  };
+
+  const handleAmountChange = (rawVal: string) => {
+    // Only allow digits and decimal point
+    let clean = rawVal.replace(/[^0-9.]/g, '');
+    const dotIndex = clean.indexOf('.');
+    if (dotIndex !== -1) {
+      const whole = clean.substring(0, dotIndex);
+      // Strictly enforce max 2 decimal places
+      const dec = clean.substring(dotIndex + 1).replace(/\./g, '').substring(0, 2);
+      clean = `${whole}.${dec}`;
+    }
+    setNewAmount(clean);
+  };
+
   const handleAddSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const debitVal = parseFloat(newDebit) || 0;
-    const creditVal = parseFloat(newCredit) || 0;
+    const amountVal = Math.round((Math.abs(parseFloat(newAmount)) || 0) * 100) / 100;
 
-    if (!newDescription.trim() && debitVal === 0 && creditVal === 0) {
+    if (!newDescription.trim() || amountVal === 0) {
       return;
     }
+
+    const debitVal = newType === 'DEBIT' ? amountVal : 0;
+    const creditVal = newType === 'CREDIT' ? amountVal : 0;
 
     onAddTransaction({
       transactionDate: newDate,
       postedDate: newDate,
-      cardNumber: newCard.trim() || 'Manual',
+      cardNumber: 'Manual',
       description: newDescription.trim() || 'Manual Entry',
       debit: debitVal,
       credit: creditVal,
       category: newCategory,
       isManuallyChanged: true,
+      isManual: true,
     });
 
     // Reset modal form
     setNewDescription('');
-    setNewDebit('');
-    setNewCredit('');
+    setNewAmount('');
+    setNewType('DEBIT');
     setIsAddModalOpen(false);
   };
 
@@ -615,6 +758,17 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                   <span>Undelete All ({deletedCount})</span>
                 </button>
               )}
+              {deletedManualCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePromptPurgeAllManual}
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-bold transition-colors shadow-2xs cursor-pointer"
+                  title="Permanently remove all deleted manual records"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Purge Manual ({deletedManualCount})</span>
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => {
@@ -686,6 +840,17 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>Undelete ({selectedDeletedIds.length})</span>
+                </button>
+              )}
+              {selectedDeletedManualIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handlePromptBulkPermanentDelete}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-600 hover:bg-rose-700 text-white shadow-2xs cursor-pointer"
+                  title="Permanently remove selected manual transactions completely"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Permanently Delete ({selectedDeletedManualIds.length})</span>
                 </button>
               )}
               <button
@@ -885,17 +1050,30 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                       </span>
                     )}
 
-                    {/* Row Action: Delete or Undelete */}
+                    {/* Row Action: Delete or Undelete / Permanent Delete */}
                     {tx.isDeleted ? (
-                      <button
-                        type="button"
-                        onClick={() => onUndeleteTransaction(tx.id)}
-                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer ml-1"
-                        title="Undelete record and restore to totals"
-                      >
-                        <RotateCcw className="w-3 h-3" />
-                        <span>Undelete</span>
-                      </button>
+                      <div className="flex items-center gap-1 ml-1">
+                        <button
+                          type="button"
+                          onClick={() => onUndeleteTransaction(tx.id)}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer"
+                          title="Undelete record and restore to totals"
+                        >
+                          <RotateCcw className="w-3 h-3" />
+                          <span>Undelete</span>
+                        </button>
+                        {isManualTransaction(tx) && (
+                          <button
+                            type="button"
+                            onClick={() => handlePromptPermanentDeleteRow(tx)}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 transition-colors cursor-pointer"
+                            title="Permanently remove this manual transaction completely"
+                          >
+                            <Trash2 className="w-3 h-3 text-rose-600 dark:text-rose-400" />
+                            <span>Delete Permanently</span>
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <button
                         type="button"
@@ -927,7 +1105,11 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                       Payment / Credit
                     </span>
                   )}
-                  {tx.isManuallyChanged ? (
+                  {isManualTransaction(tx) ? (
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                      Manual Entry
+                    </span>
+                  ) : tx.isManuallyChanged ? (
                     <span className="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">
                       • Saved Override
                     </span>
@@ -1278,7 +1460,11 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                           </span>
                         )}
 
-                        {tx.isManuallyChanged ? (
+                        {isManualTransaction(tx) ? (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                            Manual Entry
+                          </span>
+                        ) : tx.isManuallyChanged ? (
                           <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
                             • Saved Manual Override
                           </span>
@@ -1348,18 +1534,31 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                       </div>
                     </td>
 
-                    {/* Actions Column: Delete / Undelete */}
+                    {/* Actions Column: Delete / Undelete / Permanent Delete */}
                     <td className="py-3 pr-4 pl-2 text-right whitespace-nowrap">
                       {tx.isDeleted ? (
-                        <button
-                          type="button"
-                          onClick={() => onUndeleteTransaction(tx.id)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors shadow-2xs cursor-pointer"
-                          title="Undelete this record (restore to totals)"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Undelete</span>
-                        </button>
+                        <div className="inline-flex items-center justify-end gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => onUndeleteTransaction(tx.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors shadow-2xs cursor-pointer"
+                            title="Undelete this record (restore to totals)"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />
+                            <span>Undelete</span>
+                          </button>
+                          {isManualTransaction(tx) && (
+                            <button
+                              type="button"
+                              onClick={() => handlePromptPermanentDeleteRow(tx)}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/60 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800 transition-colors shadow-2xs cursor-pointer"
+                              title="Permanently remove this manual transaction completely"
+                            >
+                              <Trash2 className="w-3.5 h-3.5 text-rose-600 dark:text-rose-400" />
+                              <span>Delete Permanently</span>
+                            </button>
+                          )}
+                        </div>
                       ) : (
                         <button
                           type="button"
@@ -1457,19 +1656,6 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                  Card No.
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. 3810, 2642, 6744"
-                  value={newCard}
-                  onChange={(e) => setNewCard(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                   Description / Merchant
                 </label>
                 <input
@@ -1478,35 +1664,62 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                   placeholder="e.g. Flight to Miami (Travel)"
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                  onFocus={(e) => e.target.select()}
+                  onClick={(e) => (e.target as HTMLInputElement).select()}
+                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Debit ($)
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={newDebit}
-                    onChange={(e) => setNewDebit(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
-                  />
+              {/* Transaction Type: Debit vs Credit Toggle */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Transaction Type
+                </label>
+                <div className="grid grid-cols-2 p-1 bg-slate-100 dark:bg-slate-800 rounded-xl gap-1 border border-slate-200 dark:border-slate-700">
+                  <button
+                    type="button"
+                    onClick={() => setNewType('DEBIT')}
+                    className={`py-2 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      newType === 'DEBIT'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs border border-slate-200/80 dark:border-slate-700'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <span>Debit (Expense)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewType('CREDIT')}
+                    className={`py-2 px-3 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                      newType === 'CREDIT'
+                        ? 'bg-white dark:bg-slate-900 text-emerald-600 dark:text-emerald-400 shadow-xs border border-emerald-200/80 dark:border-emerald-800/80'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400'
+                    }`}
+                  >
+                    <span>Credit (Refund/Payment)</span>
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                    Credit ($)
-                  </label>
+              </div>
+
+              {/* Single Amount Field */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  Amount ($)
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none">
+                    $
+                  </span>
                   <input
-                    type="number"
-                    step="0.01"
+                    type="text"
+                    inputMode="decimal"
+                    required
                     placeholder="0.00"
-                    value={newCredit}
-                    onChange={(e) => setNewCredit(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white"
+                    value={newAmount}
+                    onChange={(e) => handleAmountChange(e.target.value)}
+                    onFocus={(e) => e.target.select()}
+                    onClick={(e) => (e.target as HTMLInputElement).select()}
+                    className="w-full pl-7 pr-3 py-2 text-sm font-mono rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
               </div>
@@ -1542,6 +1755,101 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Permanent Delete Confirmation */}
+      {permanentDeleteConfirm && permanentDeleteConfirm.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl max-w-md w-full p-6 animate-scale-in space-y-4">
+            {/* Header */}
+            <div className="flex items-start gap-3.5">
+              <div className="p-3 bg-rose-100 dark:bg-rose-950/70 text-rose-600 dark:text-rose-400 rounded-2xl shrink-0">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                  {permanentDeleteConfirm.title}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 leading-relaxed">
+                  {permanentDeleteConfirm.subtitle}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPermanentDeleteConfirm(null)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg transition-colors cursor-pointer"
+                title="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Warning Callout */}
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200/80 dark:border-rose-900/50 text-rose-800 dark:text-rose-300 text-xs">
+              <AlertTriangle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+              <span>This action cannot be undone. Records cannot be restored.</span>
+            </div>
+
+            {/* Items Preview */}
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/40 p-2.5 max-h-52 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800">
+              {permanentDeleteConfirm.items.map((item) => (
+                <div key={item.id} className="py-2 first:pt-0 last:pb-0 flex items-center justify-between gap-3 text-xs">
+                  <div className="min-w-0 flex-1">
+                    <div className="font-semibold text-slate-900 dark:text-white truncate">
+                      {item.description}
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                      <span>{item.date}</span>
+                      <span>•</span>
+                      <span className="font-medium text-slate-700 dark:text-slate-300">
+                        {item.category === 'Andrew' ? 'Andrew/Natalie' : item.category}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className={`font-mono font-bold ${item.isCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-900 dark:text-white'}`}>
+                      {item.isCredit ? '-' : ''}{formatCurrency(item.amount)}
+                    </span>
+                    <span className="block text-[10px] text-slate-400 font-semibold uppercase">
+                      {item.isCredit ? 'Credit' : 'Debit'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Total summary if multiple */}
+            {permanentDeleteConfirm.items.length > 1 && (
+              <div className="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200/80 dark:border-slate-700 text-xs font-bold text-slate-800 dark:text-slate-200">
+                <span>Total Amount:</span>
+                <span className="font-mono text-rose-600 dark:text-rose-400">
+                  {formatCurrency(
+                    permanentDeleteConfirm.items.reduce((sum, it) => sum + (it.isCredit ? -it.amount : it.amount), 0)
+                  )}
+                </span>
+              </div>
+            )}
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-slate-800">
+              <button
+                type="button"
+                onClick={() => setPermanentDeleteConfirm(null)}
+                className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmPermanentDelete}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 text-white transition-all shadow-xs cursor-pointer flex items-center gap-1.5 active:scale-95"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Permanently Delete</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

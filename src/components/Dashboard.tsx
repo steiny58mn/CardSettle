@@ -16,8 +16,9 @@ import {
   Info,
   BookmarkCheck,
   X,
+  Scale,
 } from 'lucide-react';
-import { CategorySummary, CategoryType, CreditOverrides, SavedStatement, Transaction } from '../types';
+import { CategorySummary, CategoryType, CreditOverrides, RemainingBalances, SavedStatement, Transaction } from '../types';
 import { formatCurrency, exportSummariesToCSV, exportTransactionsToCSV } from '../utils/csvHelper';
 import { CATEGORY_COLORS } from '../utils/rulesEngine';
 import { calculateCarriedOverTotals } from '../utils/statementHelper';
@@ -32,6 +33,8 @@ interface DashboardProps {
   selectedCategoryFilter?: string;
   savedStatements?: SavedStatement[];
   activeStatementName?: string;
+  remainingBalances?: RemainingBalances;
+  onOpenRemainingBalanceModal?: () => void;
 }
 
 export const Dashboard: React.FC<DashboardProps> = ({
@@ -44,6 +47,8 @@ export const Dashboard: React.FC<DashboardProps> = ({
   selectedCategoryFilter,
   savedStatements = [],
   activeStatementName = 'Current Statement',
+  remainingBalances,
+  onOpenRemainingBalanceModal,
 }) => {
   const [activeChartTab, setActiveChartTab] = useState<'overview' | 'comparison' | 'timeline' | 'cards'>('overview');
   const [displayScope, setDisplayScope] = useState<'combined' | 'active' | 'carried'>('combined');
@@ -62,24 +67,47 @@ export const Dashboard: React.FC<DashboardProps> = ({
   const overrides: CreditOverrides = creditOverrides || {};
   const hasSavedStatements = (savedStatements?.length || 0) > 0;
 
-  const carriedOverTotals = useMemo(() => {
-    return calculateCarriedOverTotals(savedStatements || []);
-  }, [savedStatements]);
+  const hasRemainingBalances = Boolean(
+    remainingBalances?.enabled &&
+      ((remainingBalances.Andrew || 0) !== 0 ||
+        (remainingBalances.Rachel || 0) !== 0 ||
+        (remainingBalances.Leisure || 0) !== 0)
+  );
+
+  const remainingAndrew = hasRemainingBalances ? (remainingBalances?.Andrew || 0) : 0;
+  const remainingRachel = hasRemainingBalances ? (remainingBalances?.Rachel || 0) : 0;
+  const remainingLeisure = hasRemainingBalances ? (remainingBalances?.Leisure || 0) : 0;
+  const totalRemaining = Math.round((remainingAndrew + remainingRachel + remainingLeisure) * 100) / 100;
 
   // Only active (non-deleted) transactions contribute to totals, metrics, and charts
   const activeTransactions = useMemo(() => {
     return transactions.filter((t) => !t.isDeleted);
   }, [transactions]);
 
-  // Compute category summaries dynamically from categorized transactions & credit overrides
+  const carriedOverTotals = useMemo(() => {
+    return calculateCarriedOverTotals(savedStatements || []);
+  }, [savedStatements]);
+
+  // Dynamic set of transactions based on displayScope (Combined includes all saved + active)
+  const transactionsInScope = useMemo(() => {
+    if (displayScope === 'active' || (!hasSavedStatements && !hasRemainingBalances)) {
+      return activeTransactions;
+    }
+    const savedTx = (savedStatements || []).flatMap((s) => s.transactions.filter((t) => !t.isDeleted));
+    if (displayScope === 'carried') {
+      return savedTx;
+    }
+    // 'combined'
+    return [...savedTx, ...activeTransactions];
+  }, [displayScope, hasSavedStatements, hasRemainingBalances, savedStatements, activeTransactions]);
+
+  // Compute category summaries dynamically from active categorized transactions & credit overrides
   const {
     summaries,
     totalDebit,
     totalCredit, // raw transaction credits
     totalAllocatedCredit, // effective applied credits
     totalNet,
-    cardBreakdown,
-    monthlyBreakdown,
   } = useMemo(() => {
     let tDebit = 0;
     let tCredit = 0;
@@ -89,9 +117,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       Rachel: { debit: 0, credit: 0, count: 0 },
       Leisure: { debit: 0, credit: 0, count: 0 },
     };
-
-    const cardMap: Record<string, { debit: number; credit: number; count: number; categories: Record<string, number> }> = {};
-    const monthMap: Record<string, { andrew: number; rachel: number; leisure: number; total: number }> = {};
 
     activeTransactions.forEach((tx) => {
       tDebit += tx.debit;
@@ -104,6 +129,66 @@ export const Dashboard: React.FC<DashboardProps> = ({
       catMap[cat].debit += tx.debit;
       catMap[cat].credit += tx.credit;
       catMap[cat].count += 1;
+    });
+
+    const categories: CategoryType[] = ['Andrew', 'Rachel', 'Leisure'];
+    let tAllocatedCredit = 0;
+
+    const summaryList: CategorySummary[] = categories.map((cat) => {
+      const item = catMap[cat] || { debit: 0, credit: 0, count: 0 };
+      const rawCredit = item.credit;
+      const isOverridden = typeof overrides[cat] === 'number' && !isNaN(Number(overrides[cat]));
+      const allocatedCredit = isOverridden ? Number(overrides[cat]) : rawCredit;
+      tAllocatedCredit += allocatedCredit;
+
+      const net = item.debit - allocatedCredit;
+      const colorConfig = CATEGORY_COLORS[cat];
+
+      return {
+        category: cat,
+        totalDebit: item.debit,
+        totalCredit: rawCredit,
+        allocatedCredit,
+        isCreditOverridden: isOverridden,
+        statementNet: net,
+        remainingBalance: 0,
+        totalBalance: net,
+        netSpend: net,
+        count: item.count,
+        percentage: 0, // calculated below
+        color: colorConfig.fill,
+        badgeBg: colorConfig.badgeBg,
+        textColor: colorConfig.text,
+      };
+    });
+
+    const calculatedTotalNet = tDebit - tAllocatedCredit;
+
+    // Update percentages based on calculated Total Net Spend
+    summaryList.forEach((s) => {
+      s.percentage = calculatedTotalNet > 0
+        ? (s.netSpend / calculatedTotalNet) * 100
+        : s.count > 0
+        ? (s.count / (activeTransactions.length || 1)) * 100
+        : 0;
+    });
+
+    return {
+      summaries: summaryList,
+      totalDebit: tDebit,
+      totalCredit: tCredit,
+      totalAllocatedCredit: tAllocatedCredit,
+      totalNet: calculatedTotalNet,
+    };
+  }, [activeTransactions, overrides]);
+
+  // Card & Monthly breakdown calculated from transactionsInScope to reflect the selected scope
+  const { cardBreakdown, monthlyBreakdown } = useMemo(() => {
+    const cardMap: Record<string, { debit: number; credit: number; count: number; categories: Record<string, number> }> = {};
+    const monthMap: Record<string, { andrew: number; rachel: number; leisure: number; total: number }> = {};
+
+    transactionsInScope.forEach((tx) => {
+      const cat: CategoryType = (tx.category as CategoryType) || 'Leisure';
 
       // Card breakdown
       const card = tx.cardNumber || 'Unknown';
@@ -131,45 +216,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
       monthMap[mKey].total += net;
     });
 
-    const categories: CategoryType[] = ['Andrew', 'Rachel', 'Leisure'];
-    let tAllocatedCredit = 0;
-
-    const summaryList: CategorySummary[] = categories.map((cat) => {
-      const item = catMap[cat] || { debit: 0, credit: 0, count: 0 };
-      const rawCredit = item.credit;
-      const isOverridden = typeof overrides[cat] === 'number' && !isNaN(Number(overrides[cat]));
-      const allocatedCredit = isOverridden ? Number(overrides[cat]) : rawCredit;
-      tAllocatedCredit += allocatedCredit;
-
-      const net = item.debit - allocatedCredit;
-      const colorConfig = CATEGORY_COLORS[cat];
-
-      return {
-        category: cat,
-        totalDebit: item.debit,
-        totalCredit: rawCredit,
-        allocatedCredit,
-        isCreditOverridden: isOverridden,
-        netSpend: net,
-        count: item.count,
-        percentage: 0, // calculated below
-        color: colorConfig.fill,
-        badgeBg: colorConfig.badgeBg,
-        textColor: colorConfig.text,
-      };
-    });
-
-    const calculatedTotalNet = tDebit - tAllocatedCredit;
-
-    // Update percentages based on calculated Total Net Spend
-    summaryList.forEach((s) => {
-      s.percentage = calculatedTotalNet > 0
-        ? (s.netSpend / calculatedTotalNet) * 100
-        : s.count > 0
-        ? (s.count / (activeTransactions.length || 1)) * 100
-        : 0;
-    });
-
     const cardList = Object.entries(cardMap).map(([cardNumber, stats]) => ({
       cardNumber,
       totalDebit: stats.debit,
@@ -187,15 +233,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
       }));
 
     return {
-      summaries: summaryList,
-      totalDebit: tDebit,
-      totalCredit: tCredit,
-      totalAllocatedCredit: tAllocatedCredit,
-      totalNet: calculatedTotalNet,
       cardBreakdown: cardList,
       monthlyBreakdown: sortedMonths,
     };
-  }, [activeTransactions, overrides]);
+  }, [transactionsInScope]);
 
   // Compute stats per category
   const andrewSummary = summaries.find((s) => s.category === 'Andrew');
@@ -266,17 +307,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
     setTempCreditInput('');
   };
 
-  const handleTransferCreditToLeisure = (amountToAdd: number) => {
-    if (activeTransactions.length === 0 && !hasSavedStatements) {
-      alert("No statement is currently loaded to allocate credits. Please upload a statement first.");
-      return;
-    }
-    const currentLeisure = leisureAllocatedCredit;
-    const newLeisure = Math.round((currentLeisure + amountToAdd) * 100) / 100;
-    // Calling with syncWithAndrew = true automatically deducts amountToAdd from Andrew/Natalie
-    onUpdateCreditOverride?.('Leisure', newLeisure, true);
-  };
-
   const handleQuickPreset = (preset: 'even' | 'all-andrew' | 'all-rachel' | 'all-leisure') => {
     if (preset === 'even') {
       const splitAmount = Math.round((totalCredit / 3) * 100) / 100;
@@ -319,86 +349,125 @@ export const Dashboard: React.FC<DashboardProps> = ({
     }
   };
 
-  // Effective metrics based on displayScope (Combined Grand Total vs Active Statement vs Carried Over)
+  // Effective metrics based on displayScope (Combined Grand Total vs Active Statement vs Carried Over + Remaining Cutoff Balances)
   const effectiveTotals = useMemo(() => {
-    if (!hasSavedStatements || displayScope === 'active') {
+    if (displayScope === 'active' || (!hasSavedStatements && !hasRemainingBalances)) {
       return {
         totalNet,
+        totalStatementNet: totalNet,
+        totalRemaining: 0,
         totalDebit,
         totalCredit,
         totalAllocatedCredit,
         andrewGross,
         andrewAutoCredit: andrewSummary?.totalCredit || 0,
         andrewAllocatedCredit,
+        andrewStatementNet: andrewNet,
+        andrewRemaining: 0,
         andrewNet,
         andrewCount: andrewSummary?.count || 0,
         rachelGross,
         rachelAutoCredit: rachelSummary?.totalCredit || 0,
         rachelAllocatedCredit,
+        rachelStatementNet: rachelNet,
+        rachelRemaining: 0,
         rachelNet,
         rachelCount: rachelSummary?.count || 0,
         leisureGross,
         leisureAutoCredit: leisureSummary?.totalCredit || 0,
         leisureAllocatedCredit,
+        leisureStatementNet: leisureNet,
+        leisureRemaining: 0,
         leisureNet,
         leisureCount: leisureSummary?.count || 0,
       };
     }
 
     if (displayScope === 'carried' || activeTransactions.length === 0) {
+      const cAndrewNet = carriedOverTotals.andrew.netSpend;
+      const cRachelNet = carriedOverTotals.rachel.netSpend;
+      const cLeisureNet = carriedOverTotals.leisure.netSpend;
+      const cTotalNet = carriedOverTotals.totalNetSpend;
+
       return {
-        totalNet: carriedOverTotals.totalNetSpend,
+        totalNet: Math.round((cTotalNet + totalRemaining) * 100) / 100,
+        totalStatementNet: cTotalNet,
+        totalRemaining,
         totalDebit: carriedOverTotals.totalDebit,
         totalCredit: carriedOverTotals.totalCredit,
         totalAllocatedCredit: carriedOverTotals.totalAllocatedCredit,
         andrewGross: carriedOverTotals.andrew.debit,
         andrewAutoCredit: carriedOverTotals.andrew.credit,
         andrewAllocatedCredit: carriedOverTotals.andrew.allocatedCredit,
-        andrewNet: carriedOverTotals.andrew.netSpend,
+        andrewStatementNet: cAndrewNet,
+        andrewRemaining: remainingAndrew,
+        andrewNet: Math.round((cAndrewNet + remainingAndrew) * 100) / 100,
         andrewCount: carriedOverTotals.andrew.count,
         rachelGross: carriedOverTotals.rachel.debit,
         rachelAutoCredit: carriedOverTotals.rachel.credit,
         rachelAllocatedCredit: carriedOverTotals.rachel.allocatedCredit,
-        rachelNet: carriedOverTotals.rachel.netSpend,
+        rachelStatementNet: cRachelNet,
+        rachelRemaining: remainingRachel,
+        rachelNet: Math.round((cRachelNet + remainingRachel) * 100) / 100,
         rachelCount: carriedOverTotals.rachel.count,
         leisureGross: carriedOverTotals.leisure.debit,
         leisureAutoCredit: carriedOverTotals.leisure.credit,
         leisureAllocatedCredit: carriedOverTotals.leisure.allocatedCredit,
-        leisureNet: carriedOverTotals.leisure.netSpend,
+        leisureStatementNet: cLeisureNet,
+        leisureRemaining: remainingLeisure,
+        leisureNet: Math.round((cLeisureNet + remainingLeisure) * 100) / 100,
         leisureCount: carriedOverTotals.leisure.count,
       };
     }
 
-    // Combined Grand Total
+    // Combined Grand Total (Active + Carried Over + Remaining Cutoff Balances)
+    const combAndrewStmt = andrewNet + carriedOverTotals.andrew.netSpend;
+    const combRachelStmt = rachelNet + carriedOverTotals.rachel.netSpend;
+    const combLeisureStmt = leisureNet + carriedOverTotals.leisure.netSpend;
+    const combTotalStmt = totalNet + carriedOverTotals.totalNetSpend;
+
     return {
-      totalNet: totalNet + carriedOverTotals.totalNetSpend,
+      totalNet: Math.round((combTotalStmt + totalRemaining) * 100) / 100,
+      totalStatementNet: combTotalStmt,
+      totalRemaining,
       totalDebit: totalDebit + carriedOverTotals.totalDebit,
       totalCredit: totalCredit + carriedOverTotals.totalCredit,
       totalAllocatedCredit: totalAllocatedCredit + carriedOverTotals.totalAllocatedCredit,
       andrewGross: andrewGross + carriedOverTotals.andrew.debit,
       andrewAutoCredit: (andrewSummary?.totalCredit || 0) + carriedOverTotals.andrew.credit,
       andrewAllocatedCredit: andrewAllocatedCredit + carriedOverTotals.andrew.allocatedCredit,
-      andrewNet: andrewNet + carriedOverTotals.andrew.netSpend,
+      andrewStatementNet: combAndrewStmt,
+      andrewRemaining: remainingAndrew,
+      andrewNet: Math.round((combAndrewStmt + remainingAndrew) * 100) / 100,
       andrewCount: (andrewSummary?.count || 0) + carriedOverTotals.andrew.count,
       rachelGross: rachelGross + carriedOverTotals.rachel.debit,
       rachelAutoCredit: (rachelSummary?.totalCredit || 0) + carriedOverTotals.rachel.credit,
       rachelAllocatedCredit: rachelAllocatedCredit + carriedOverTotals.rachel.allocatedCredit,
-      rachelNet: rachelNet + carriedOverTotals.rachel.netSpend,
+      rachelStatementNet: combRachelStmt,
+      rachelRemaining: remainingRachel,
+      rachelNet: Math.round((combRachelStmt + remainingRachel) * 100) / 100,
       rachelCount: (rachelSummary?.count || 0) + carriedOverTotals.rachel.count,
       leisureGross: leisureGross + carriedOverTotals.leisure.debit,
       leisureAutoCredit: (leisureSummary?.totalCredit || 0) + carriedOverTotals.leisure.credit,
       leisureAllocatedCredit: leisureAllocatedCredit + carriedOverTotals.leisure.allocatedCredit,
-      leisureNet: leisureNet + carriedOverTotals.leisure.netSpend,
+      leisureStatementNet: combLeisureStmt,
+      leisureRemaining: remainingLeisure,
+      leisureNet: Math.round((combLeisureStmt + remainingLeisure) * 100) / 100,
       leisureCount: (leisureSummary?.count || 0) + carriedOverTotals.leisure.count,
     };
   }, [
     hasSavedStatements,
+    hasRemainingBalances,
     displayScope,
     activeTransactions.length,
     totalNet,
     totalDebit,
     totalCredit,
     totalAllocatedCredit,
+    totalRemaining,
+    remainingAndrew,
+    remainingRachel,
+    remainingLeisure,
     andrewGross,
     andrewAllocatedCredit,
     andrewNet,
@@ -459,6 +528,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalCredit: 0,
         allocatedCredit: effectiveTotals.andrewAllocatedCredit,
         isCreditOverridden: andrewSummary?.isCreditOverridden,
+        statementNet: effectiveTotals.andrewStatementNet,
+        remainingBalance: effectiveTotals.andrewRemaining,
+        totalBalance: effectiveTotals.andrewNet,
         netSpend: effectiveTotals.andrewNet,
         count: effectiveTotals.andrewCount,
         percentage: sumNet > 0 ? (effectiveTotals.andrewNet / sumNet) * 100 : 0,
@@ -472,6 +544,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalCredit: 0,
         allocatedCredit: effectiveTotals.rachelAllocatedCredit,
         isCreditOverridden: rachelSummary?.isCreditOverridden,
+        statementNet: effectiveTotals.rachelStatementNet,
+        remainingBalance: effectiveTotals.rachelRemaining,
+        totalBalance: effectiveTotals.rachelNet,
         netSpend: effectiveTotals.rachelNet,
         count: effectiveTotals.rachelCount,
         percentage: sumNet > 0 ? (effectiveTotals.rachelNet / sumNet) * 100 : 0,
@@ -485,6 +560,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
         totalCredit: 0,
         allocatedCredit: effectiveTotals.leisureAllocatedCredit,
         isCreditOverridden: leisureSummary?.isCreditOverridden,
+        statementNet: effectiveTotals.leisureStatementNet,
+        remainingBalance: effectiveTotals.leisureRemaining,
+        totalBalance: effectiveTotals.leisureNet,
         netSpend: effectiveTotals.leisureNet,
         count: effectiveTotals.leisureCount,
         percentage: sumNet > 0 ? (effectiveTotals.leisureNet / sumNet) * 100 : 0,
@@ -505,7 +583,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleExportAll = () => {
-    exportTransactionsToCSV(activeTransactions);
+    exportTransactionsToCSV(transactionsInScope.length > 0 ? transactionsInScope : activeTransactions);
   };
 
   // SVG Pie / Donut calculation
@@ -562,11 +640,72 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Scope Selector Bar when there are saved statements */}
-      {hasSavedStatements && (
+      {/* Remaining Cutoff Balances Banner */}
+      {hasRemainingBalances ? (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-amber-500 text-white shadow-xs shrink-0">
+              <Scale className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-bold text-amber-900 dark:text-amber-200 uppercase tracking-wider">
+                  Remaining Cutoff Balances Active:
+                </span>
+                <span className="text-xs font-bold px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/60 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700">
+                  Total Cutoff: {formatCurrency(totalRemaining)}
+                </span>
+              </div>
+              <p className="text-[11px] text-amber-800/90 dark:text-amber-300/80 mt-0.5">
+                Baseline carried over into calculations &mdash; Andrew: <strong>{formatCurrency(remainingAndrew)}</strong> &bull; Rachel: <strong>{formatCurrency(remainingRachel)}</strong> &bull; Leisure: <strong>{formatCurrency(remainingLeisure)}</strong>
+              </p>
+            </div>
+          </div>
+          {onOpenRemainingBalanceModal && (
+            <button
+              type="button"
+              onClick={onOpenRemainingBalanceModal}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl bg-white dark:bg-slate-900 hover:bg-amber-100 dark:hover:bg-slate-800 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 transition-colors shadow-2xs cursor-pointer shrink-0 flex items-center gap-1.5 self-start sm:self-auto"
+            >
+              <Scale className="w-3.5 h-3.5 text-amber-600" />
+              Adjust Cutoff Balances
+            </button>
+          )}
+        </div>
+      ) : onOpenRemainingBalanceModal ? (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-purple-50/70 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800/60 shadow-2xs">
+          <div className="flex items-center gap-2.5">
+            <div className="p-2 rounded-xl bg-purple-600 text-white shadow-xs shrink-0">
+              <Scale className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-purple-950 dark:text-purple-200 uppercase tracking-wider">
+                  Remaining Balances &amp; Statement Cutoff
+                </span>
+              </div>
+              <p className="text-[11px] text-purple-800/80 dark:text-purple-300/80 mt-0.5">
+                Set persistent starting cutoff balances across Andrew, Rachel, and Leisure without perpetually loading past PDF statements.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onOpenRemainingBalanceModal}
+            className="px-3.5 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-700 text-white transition-all shadow-xs active:scale-95 cursor-pointer shrink-0 flex items-center gap-1.5 self-start sm:self-auto"
+            title="Set starting cutoff balances for Andrew, Rachel, and Leisure"
+          >
+            <Scale className="w-3.5 h-3.5" />
+            <span>Set Remaining Balance</span>
+          </button>
+        </div>
+      ) : null}
+
+      {/* Scope Selector Bar when there are saved statements or remaining cutoff balances */}
+      {(hasSavedStatements || hasRemainingBalances) && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl bg-indigo-50/80 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800 shadow-2xs">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs">
+            <div className="p-2 rounded-xl bg-indigo-600 text-white shadow-xs shrink-0">
               <Layers className="w-4 h-4" />
             </div>
             <div>
@@ -579,15 +718,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     ? 'Combined Grand Total'
                     : displayScope === 'active'
                     ? `Active Statement: ${activeStatementName}`
-                    : `Carried-Over Baseline (${savedStatements.length} statements)`}
+                    : hasSavedStatements
+                    ? `Carried-Over Baseline (${savedStatements.length} statements)`
+                    : 'Remaining Cutoff Baseline'}
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
                 {displayScope === 'combined'
-                  ? `Totals from the active file and all ${savedStatements.length} saved statements are combined below.`
+                  ? `Totals include active file charges${hasSavedStatements ? `, ${savedStatements.length} saved statement(s)` : ''}${hasRemainingBalances ? `, and cutoff balances` : ''}.`
                   : displayScope === 'active'
                   ? `Showing only charges and credits from the active file (${activeStatementName}).`
-                  : `Showing the locked totals from ${savedStatements.length} previously finalized statement(s).`}
+                  : `Showing carried totals from saved statements${hasRemainingBalances ? ' plus stored cutoff balances' : ''}.`}
               </p>
             </div>
           </div>
@@ -602,7 +743,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Grand Total ({formatCurrency(totalNet + carriedOverTotals.totalNetSpend)})
+              Grand Total ({formatCurrency(totalNet + carriedOverTotals.totalNetSpend + totalRemaining)})
             </button>
             <button
               type="button"
@@ -624,7 +765,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              Carried Over ({formatCurrency(carriedOverTotals.totalNetSpend)})
+              Carried &amp; Cutoff ({formatCurrency(carriedOverTotals.totalNetSpend + totalRemaining)})
             </button>
           </div>
         </div>
@@ -636,10 +777,10 @@ export const Dashboard: React.FC<DashboardProps> = ({
         <div className="relative overflow-hidden bg-gradient-to-br from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white p-5 rounded-2xl shadow-sm border border-slate-800">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              {hasSavedStatements && displayScope === 'combined'
+              {(hasSavedStatements || hasRemainingBalances) && displayScope === 'combined'
                 ? 'Combined Net Spend'
                 : displayScope === 'carried'
-                ? 'Carried Net Spend'
+                ? 'Carried & Cutoff Net'
                 : 'Total Net Spend'}
             </span>
             <div className="p-2 bg-white/10 rounded-xl">
@@ -661,9 +802,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 Credits: -{formatCurrency(effectiveTotals.totalAllocatedCredit)}
               </span>
             </div>
-            {hasSavedStatements && displayScope === 'combined' && (
-              <div className="mt-1.5 text-[10px] text-slate-400">
-                Active: {formatCurrency(totalNet)} + Carried: {formatCurrency(carriedOverTotals.totalNetSpend)}
+            {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
+              <div className="mt-1.5 text-[10px] text-slate-400 space-y-0.5">
+                <div>
+                  Stmt Net: {formatCurrency(effectiveTotals.totalStatementNet)}
+                  {effectiveTotals.totalRemaining !== 0 && (
+                    <span> + Cutoff: {formatCurrency(effectiveTotals.totalRemaining)}</span>
+                  )}
+                </div>
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope === 'combined' && (
+                  <div className="text-slate-400/80 text-[9px]">
+                    Active: {formatCurrency(totalNet)} + Carried: {formatCurrency(carriedOverTotals.totalNetSpend)}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -692,7 +843,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
               )}
               <span className="text-xs px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 font-medium border border-purple-200 dark:border-purple-800">
-                2642 & 6744
+                2642 &amp; 6744
               </span>
             </div>
           </div>
@@ -724,9 +875,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     : '0%'}
                 </span>
               </div>
-              {hasSavedStatements && displayScope === 'combined' && (
+              {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
                 <div className="text-[10px] text-purple-600 dark:text-purple-400 font-medium pt-0.5">
-                  Active: {formatCurrency(andrewNet)} + Carried: {formatCurrency(carriedOverTotals.andrew.netSpend)}
+                  Stmt Net: {formatCurrency(effectiveTotals.andrewStatementNet)}
+                  {effectiveTotals.andrewRemaining !== 0 && (
+                    <span> + Cutoff: {formatCurrency(effectiveTotals.andrewRemaining)}</span>
+                  )}
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope === 'combined' && (
+                    <div className="text-[9px] text-purple-500/80">
+                      Active: {formatCurrency(andrewNet)} + Carried: {formatCurrency(carriedOverTotals.andrew.netSpend)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -788,9 +947,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     : '0%'}
                 </span>
               </div>
-              {hasSavedStatements && displayScope === 'combined' && (
+              {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
                 <div className="text-[10px] text-pink-500 dark:text-pink-300 font-medium pt-0.5">
-                  Active: {formatCurrency(rachelNet)} + Carried: {formatCurrency(carriedOverTotals.rachel.netSpend)}
+                  Stmt Net: {formatCurrency(effectiveTotals.rachelStatementNet)}
+                  {effectiveTotals.rachelRemaining !== 0 && (
+                    <span> + Cutoff: {formatCurrency(effectiveTotals.rachelRemaining)}</span>
+                  )}
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope === 'combined' && (
+                    <div className="text-[9px] text-pink-400/80">
+                      Active: {formatCurrency(rachelNet)} + Carried: {formatCurrency(carriedOverTotals.rachel.netSpend)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -852,9 +1019,17 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     : '0%'}
                 </span>
               </div>
-              {hasSavedStatements && displayScope === 'combined' && (
+              {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
                 <div className="text-[10px] text-sky-600 dark:text-sky-400 font-medium pt-0.5">
-                  Active: {formatCurrency(leisureNet)} + Carried: {formatCurrency(carriedOverTotals.leisure.netSpend)}
+                  Stmt Net: {formatCurrency(effectiveTotals.leisureStatementNet)}
+                  {effectiveTotals.leisureRemaining !== 0 && (
+                    <span> + Cutoff: {formatCurrency(effectiveTotals.leisureRemaining)}</span>
+                  )}
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope === 'combined' && (
+                    <div className="text-[9px] text-sky-500/80">
+                      Active: {formatCurrency(leisureNet)} + Carried: {formatCurrency(carriedOverTotals.leisure.netSpend)}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -943,6 +1118,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
           {/* Quick preset actions */}
           <div className="flex items-center flex-wrap gap-1.5">
+            {onOpenRemainingBalanceModal && (
+              <button
+                type="button"
+                onClick={onOpenRemainingBalanceModal}
+                className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-1.5 border shadow-2xs cursor-pointer ${
+                  hasRemainingBalances
+                    ? 'bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-200 border-purple-300 dark:border-purple-700'
+                    : 'bg-white dark:bg-slate-800 text-purple-700 dark:text-purple-300 hover:bg-purple-50 dark:hover:bg-purple-950/40 border-purple-200 dark:border-purple-800/80'
+                }`}
+                title="Store or adjust starting Remaining Balance cutoff baseline across Andrew, Rachel, and Leisure"
+              >
+                <Scale className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400" />
+                <span>{hasRemainingBalances ? `Cutoff (${formatCurrency(totalRemaining)})` : 'Remaining Balance'}</span>
+              </button>
+            )}
+
             <button
               type="button"
               onClick={() => onResetAllCreditOverrides?.()}
@@ -1026,19 +1217,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-purple-600" />
                 <span className="font-bold text-sm text-slate-900 dark:text-white">Andrew/Natalie</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 font-semibold border border-purple-200/60 dark:border-purple-800/60">
-                  ⇄ Linked to Leisure
+                <span
+                  title="Linked to Leisure: credit offset adjustments stay synchronized between Andrew/Natalie and Leisure"
+                  className="text-[9px] px-1.5 py-0.5 rounded-md bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 font-bold border border-sky-200/60 dark:border-sky-800/60 cursor-help"
+                >
+                  ⇄ Leisure
                 </span>
               </div>
               {andrewSummary?.isCreditOverridden ? (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
                   Manual Override
                 </span>
-              ) : (
+              ) : hasSavedStatements && activeTransactions.length === 0 ? (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                  {hasSavedStatements && activeTransactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
+                  Carried Applied
                 </span>
-              )}
+              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs py-1 border-y border-slate-100 dark:border-slate-800">
@@ -1091,7 +1285,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                   <div className="flex items-center gap-1.5">
                     <div className="relative flex-1">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">$</span>
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold pointer-events-none select-none">$</span>
                       <input
                         ref={creditInputRef}
                         type="text"
@@ -1141,7 +1335,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     }
                     handleStartEditCredit('Andrew', andrewAllocatedCredit);
                   }}
-                  className="group flex flex-col p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 bg-white dark:bg-slate-800 cursor-pointer transition-colors"
+                  className="group flex flex-col p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-indigo-400 dark:hover:border-indigo-500 bg-white dark:bg-slate-800 cursor-pointer select-none transition-colors"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
@@ -1222,10 +1416,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* Calculated Net Result */}
             <div className="p-2.5 rounded-lg bg-purple-50/60 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900/60 flex items-center justify-between">
               <div>
-                <span className="text-xs text-purple-900 dark:text-purple-300 font-semibold block">Net Spend:</span>
-                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
+                <span className="text-xs text-purple-900 dark:text-purple-300 font-semibold block">Net Due / Spend:</span>
+                {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
                   <span className="text-[10px] text-purple-700/80 dark:text-purple-300/80 block">
-                    Carried: {formatCurrency(carriedOverTotals.andrew.netSpend)} + Active: {formatCurrency(andrewNet)}
+                    Stmt: {formatCurrency(effectiveTotals.andrewStatementNet)}
+                    {effectiveTotals.andrewRemaining !== 0 && (
+                      <span> + Cutoff: {formatCurrency(effectiveTotals.andrewRemaining)}</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -1253,11 +1450,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
                   Manual Override
                 </span>
-              ) : (
+              ) : hasSavedStatements && activeTransactions.length === 0 ? (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                  {hasSavedStatements && activeTransactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
+                  Carried Applied
                 </span>
-              )}
+              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs py-1 border-y border-slate-100 dark:border-slate-800">
@@ -1310,7 +1507,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                   <div className="flex items-center gap-1.5">
                     <div className="relative flex-1">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">$</span>
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold pointer-events-none select-none">$</span>
                       <input
                         ref={creditInputRef}
                         type="text"
@@ -1360,7 +1557,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     }
                     handleStartEditCredit('Rachel', rachelAllocatedCredit);
                   }}
-                  className="group flex flex-col p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-pink-400 dark:hover:border-pink-500 bg-white dark:bg-slate-800 cursor-pointer transition-colors"
+                  className="group flex flex-col p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-pink-400 dark:hover:border-pink-500 bg-white dark:bg-slate-800 cursor-pointer select-none transition-colors"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
@@ -1441,10 +1638,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* Calculated Net Result */}
             <div className="p-2.5 rounded-lg bg-pink-50/60 dark:bg-pink-950/40 border border-pink-100 dark:border-pink-900/60 flex items-center justify-between">
               <div>
-                <span className="text-xs text-pink-900 dark:text-pink-300 font-semibold block">Net Spend:</span>
-                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
+                <span className="text-xs text-pink-900 dark:text-pink-300 font-semibold block">Net Due / Spend:</span>
+                {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
                   <span className="text-[10px] text-pink-700/80 dark:text-pink-300/80 block">
-                    Carried: {formatCurrency(carriedOverTotals.rachel.netSpend)} + Active: {formatCurrency(rachelNet)}
+                    Stmt: {formatCurrency(effectiveTotals.rachelStatementNet)}
+                    {effectiveTotals.rachelRemaining !== 0 && (
+                      <span> + Cutoff: {formatCurrency(effectiveTotals.rachelRemaining)}</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -1467,19 +1667,22 @@ export const Dashboard: React.FC<DashboardProps> = ({
               <div className="flex items-center gap-2">
                 <span className="w-3 h-3 rounded-full bg-sky-500" />
                 <span className="font-bold text-sm text-slate-900 dark:text-white">Leisure</span>
-                <span className="text-[10px] px-1.5 py-0.5 rounded-sm bg-sky-50 dark:bg-sky-950/80 text-sky-700 dark:text-sky-300 font-semibold border border-sky-200/60 dark:border-sky-800/60">
-                  ⇄ Linked to Andrew
+                <span
+                  title="Linked to Andrew: credit offset adjustments stay synchronized between Andrew/Natalie and Leisure"
+                  className="text-[9px] px-1.5 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-300 font-bold border border-purple-200/60 dark:border-purple-800/60 cursor-help"
+                >
+                  ⇄ Andrew
                 </span>
               </div>
               {leisureSummary?.isCreditOverridden ? (
                 <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900 text-amber-800 dark:text-amber-200">
                   Manual Override
                 </span>
-              ) : (
+              ) : hasSavedStatements && activeTransactions.length === 0 ? (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                  {hasSavedStatements && activeTransactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
+                  Carried Applied
                 </span>
-              )}
+              ) : null}
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs py-1 border-y border-slate-100 dark:border-slate-800">
@@ -1561,7 +1764,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
                   <div className="flex items-center gap-1.5">
                     <div className="relative flex-1">
-                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold">$</span>
+                      <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 font-bold pointer-events-none select-none">$</span>
                       <input
                         ref={creditInputRef}
                         type="text"
@@ -1647,7 +1850,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     }
                     handleStartEditCredit('Leisure', leisureAllocatedCredit);
                   }}
-                  className="group flex flex-col p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-sky-400 dark:hover:border-sky-500 bg-white dark:bg-slate-800 cursor-pointer transition-colors"
+                  className="group flex flex-col p-2 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-sky-400 dark:hover:border-sky-500 bg-white dark:bg-slate-800 cursor-pointer select-none transition-colors"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
@@ -1670,29 +1873,6 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   )}
                 </div>
               )}
-            </div>
-
-            {/* Transfer from Andrew/Natalie Quick Chips */}
-            <div className="pt-1 border-t border-slate-100 dark:border-slate-800/80">
-              <div className="flex items-center justify-between text-[11px] font-semibold text-slate-700 dark:text-slate-300 mb-1.5">
-                <span className="flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-sky-500" /> Transfer from Andrew/Natalie:
-                </span>
-              </div>
-              <div className="grid grid-cols-4 gap-1.5">
-                {[25, 50, 100, 250].map((amt) => (
-                  <button
-                    key={amt}
-                    type="button"
-                    onClick={() => handleTransferCreditToLeisure(amt)}
-                    disabled={activeTransactions.length === 0}
-                    className="py-1 px-1.5 text-center text-[11px] font-bold rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/70 dark:hover:bg-sky-900/80 text-sky-700 dark:text-sky-200 border border-sky-200 dark:border-sky-800 transition-colors shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
-                    title={`Add +$${amt} to Leisure and deduct -$${amt} from Andrew/Natalie`}
-                  >
-                    +${amt}
-                  </button>
-                ))}
-              </div>
             </div>
 
             {/* Auto-Apply Unapplied Button */}
@@ -1735,11 +1915,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <div
                   id="auto-apply-leisure-status"
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-[11px] font-medium bg-slate-100/70 dark:bg-slate-800/40 text-slate-500 dark:text-slate-400 border border-slate-200/60 dark:border-slate-800/60"
-                  title="All statement credits are already 100% applied across buckets"
+                  title="All credits are already 100% applied across buckets"
                 >
                   <span className="flex items-center gap-1.5">
                     <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                    <span>All Statement Credits Applied</span>
+                    <span>All Credits Applied</span>
                   </span>
                   <span className="text-[10px] font-semibold text-slate-400 dark:text-slate-500">
                     $0.00 unapplied
@@ -1751,10 +1931,13 @@ export const Dashboard: React.FC<DashboardProps> = ({
             {/* Calculated Net Result */}
             <div className="p-2.5 rounded-lg bg-sky-50/60 dark:bg-sky-950/40 border border-sky-100 dark:border-sky-900/60 flex items-center justify-between">
               <div>
-                <span className="text-xs text-sky-900 dark:text-sky-300 font-semibold block">Net Spend:</span>
-                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
+                <span className="text-xs text-sky-900 dark:text-sky-300 font-semibold block">Net Due / Spend:</span>
+                {(hasSavedStatements || hasRemainingBalances) && displayScope !== 'active' && (
                   <span className="text-[10px] text-sky-700/80 dark:text-sky-300/80 block">
-                    Carried: {formatCurrency(carriedOverTotals.leisure.netSpend)} + Active: {formatCurrency(leisureNet)}
+                    Stmt: {formatCurrency(effectiveTotals.leisureStatementNet)}
+                    {effectiveTotals.leisureRemaining !== 0 && (
+                      <span> + Cutoff: {formatCurrency(effectiveTotals.leisureRemaining)}</span>
+                    )}
                   </span>
                 )}
               </div>
@@ -1859,19 +2042,19 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   {/* Center Text */}
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center">
                     <span className="text-xs uppercase font-medium text-slate-400">
-                      {hoveredSlice || 'Net Spend'}
+                      {hoveredSlice || (displayScope === 'active' ? 'Active Spend' : 'Net Due / Spend')}
                     </span>
                     <span className="text-base font-extrabold text-slate-900 dark:text-white">
                       {hoveredSlice
-                        ? formatCurrency(summaries.find((s) => s.category === hoveredSlice)?.netSpend || 0)
-                        : formatCurrency(totalNet)}
+                        ? formatCurrency(effectiveSummaries.find((s) => s.category === hoveredSlice)?.netSpend || 0)
+                        : formatCurrency(effectiveTotals.totalNet)}
                     </span>
                   </div>
                 </div>
 
                 {/* Donut Legend */}
                 <div className="flex-1 w-full space-y-3">
-                  {summaries.map((s) => {
+                  {effectiveSummaries.map((s) => {
                     const isSelected = selectedCategoryFilter === s.category;
                     return (
                       <div
@@ -1887,11 +2070,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       >
                         <div className="flex items-center gap-3">
                           <span
-                            className="w-3.5 h-3.5 rounded-md shadow-2xs"
+                            className="w-3.5 h-3.5 rounded-md shadow-2xs shrink-0"
                             style={{ backgroundColor: s.color }}
                           />
                           <div>
-                            <div className="flex items-center gap-1.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
                               <span className="font-bold text-sm text-slate-800 dark:text-slate-200">
                                 {s.category === 'Andrew' ? 'Andrew/Natalie' : s.category}
                               </span>
@@ -1900,6 +2083,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                                   Manual Credit
                                 </span>
                               )}
+                              {s.remainingBalance ? (
+                                <span className="text-[9px] font-semibold px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
+                                  Cutoff: {formatCurrency(s.remainingBalance)}
+                                </span>
+                              ) : null}
                             </div>
                             <span className="text-xs text-slate-400 block">{s.count} transactions</span>
                           </div>
@@ -1921,9 +2109,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
             {activeChartTab === 'comparison' && (
               <div className="w-full space-y-5">
-                {summaries.map((s) => {
+                {effectiveSummaries.map((s) => {
                   const maxVal = Math.max(
-                    ...summaries.map((x) => Math.max(x.totalDebit, Math.abs(x.netSpend), Math.abs(x.allocatedCredit))),
+                    ...effectiveSummaries.map((x) => Math.max(x.totalDebit, Math.abs(x.netSpend), Math.abs(x.allocatedCredit))),
                     1
                   );
                   const debitPct = Math.min(100, Math.max(0, (s.totalDebit / maxVal) * 100));
@@ -1932,7 +2120,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   return (
                     <div key={s.category} className="space-y-1.5">
                       <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
-                        <span className="flex items-center gap-2">
+                        <span className="flex items-center gap-2 flex-wrap">
                           <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: s.color }}></span>
                           {s.category === 'Andrew' ? 'Andrew/Natalie' : s.category}
                           {s.isCreditOverridden && (
@@ -1940,6 +2128,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
                               (Manual Credit)
                             </span>
                           )}
+                          {s.remainingBalance ? (
+                            <span className="text-[10px] text-amber-600 dark:text-amber-400 font-medium">
+                              (Cutoff: {formatCurrency(s.remainingBalance)})
+                            </span>
+                          ) : null}
                         </span>
                         <div className="flex gap-4 items-center">
                           <span className="text-slate-500">Gross: {formatCurrency(s.totalDebit)}</span>

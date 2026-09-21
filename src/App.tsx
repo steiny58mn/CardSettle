@@ -68,6 +68,7 @@ export default function App() {
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
   const [isClearConfirmOpen, setIsClearConfirmOpen] = useState(false);
+  const [clearRemainingBalanceOnAll, setClearRemainingBalanceOnAll] = useState(true);
   const [isSaveModalOpen, setIsSaveModalOpen] = useState(false);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [statementToReopen, setStatementToReopen] = useState<SavedStatement | null>(null);
@@ -264,15 +265,15 @@ export default function App() {
     (category: CategoryType, amount: number | null, syncWithAndrew: boolean = true) => {
       let toastMsg = '';
       setCreditOverrides((prev) => {
-        // Determine automatic transaction credits for reference
+        // Determine automatic transaction credits for reference (ignoring soft-deleted transactions)
         const autoAndrew = Math.round(
           transactions
-            .filter((t) => t.category === 'Andrew')
+            .filter((t) => !t.isDeleted && t.category === 'Andrew')
             .reduce((sum, t) => sum + t.credit, 0) * 100
         ) / 100;
         const autoLeisure = Math.round(
           transactions
-            .filter((t) => t.category === 'Leisure')
+            .filter((t) => !t.isDeleted && t.category === 'Leisure')
             .reduce((sum, t) => sum + t.credit, 0) * 100
         ) / 100;
 
@@ -655,12 +656,38 @@ export default function App() {
     showToast(`Restored ${ids.length} records to totals.`);
   }, []);
 
+  // Permanently delete a manual transaction
+  const handlePermanentDeleteTransaction = useCallback((id: string) => {
+    setTransactions((prev) => {
+      const target = prev.find((t) => t.id === id);
+      if (target) {
+        removeDeletedSignature(target);
+      }
+      return prev.filter((t) => t.id !== id);
+    });
+    showToast('Manual transaction permanently deleted.');
+  }, []);
+
+  // Bulk permanently delete manual transactions
+  const handlePermanentDeleteBulkTransactions = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setTransactions((prev) => {
+      const targets = prev.filter((t) => idSet.has(t.id));
+      if (targets.length > 0) {
+        removeDeletedSignatures(targets);
+      }
+      return prev.filter((t) => !idSet.has(t.id));
+    });
+    showToast(`Permanently deleted ${ids.length} manual transaction(s).`);
+  }, []);
+
   // Add transaction
   const handleAddTransaction = useCallback((newTxData: Omit<Transaction, 'id'>) => {
     const newTx: Transaction = {
       ...newTxData,
       id: `manual_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       isManuallyChanged: true,
+      isManual: true,
     };
     saveManualOverride(newTx, newTx.category);
 
@@ -729,9 +756,17 @@ export default function App() {
     setCreditOverrides({});
     clearManualOverrides();
     clearDeletedSignatures();
+    if (clearRemainingBalanceOnAll) {
+      clearRemainingBalances();
+      setRemainingBalances({ Andrew: 0, Rachel: 0, Leisure: 0 });
+    }
     setActiveStatementName('Statement 1');
     setIsClearConfirmOpen(false);
-    showToast(`Cleared all ${totalTx} transactions across active workspace and ${totalStmts} saved statement${totalStmts === 1 ? '' : 's'}.`);
+    showToast(
+      `Cleared all ${totalTx} transactions across active workspace and ${totalStmts} saved statement${
+        totalStmts === 1 ? '' : 's'
+      }${clearRemainingBalanceOnAll ? ' and reset remaining cutoff balances' : ''}.`
+    );
   };
 
   // Load sample dataset
@@ -819,7 +854,7 @@ export default function App() {
         onLoadSample={handleLoadSample}
         onExportAll={handleExportAll}
         onExportSummary={handleExportSummary}
-        onClearAll={(transactions.length > 0 || savedStatements.length > 0) ? handlePromptClearAll : undefined}
+        onClearAll={(transactions.length > 0 || savedStatements.length > 0 || hasRemainingBalances) ? handlePromptClearAll : undefined}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         savedStatementsCount={savedStatements.length}
@@ -885,9 +920,11 @@ export default function App() {
             onDeleteBulkTransactions={handleDeleteBulkTransactions}
             onUndeleteTransaction={handleUndeleteTransaction}
             onUndeleteBulkTransactions={handleUndeleteBulkTransactions}
+            onPermanentDeleteTransaction={handlePermanentDeleteTransaction}
+            onPermanentDeleteBulkTransactions={handlePermanentDeleteBulkTransactions}
             onAddTransaction={handleAddTransaction}
             onResetToDefaultRules={handleResetToDefaultRules}
-            onClearAll={(transactions.length > 0 || savedStatements.length > 0) ? handlePromptClearAll : undefined}
+            onClearAll={(transactions.length > 0 || savedStatements.length > 0 || hasRemainingBalances) ? handlePromptClearAll : undefined}
             selectedCategoryFilter={selectedCategoryFilter}
             onSelectCategoryFilter={setSelectedCategoryFilter}
             activeStatementName={activeStatementName}
@@ -920,7 +957,7 @@ export default function App() {
               Workspace Scope:
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
-              {transactions.length} Active Records
+              {activeTransactionsCount} Active Records{transactions.length > activeTransactionsCount ? ` (${transactions.length - activeTransactionsCount} deleted)` : ''}
             </span>
             <span>•</span>
             <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 font-bold text-slate-800 dark:text-slate-200 border border-slate-200 dark:border-slate-700">
@@ -941,7 +978,7 @@ export default function App() {
             </button>
           </div>
 
-          {(transactions.length > 0 || savedStatements.length > 0) && (
+          {(transactions.length > 0 || savedStatements.length > 0 || hasRemainingBalances) && (
             <button
               type="button"
               onClick={handlePromptClearAll}
@@ -1046,29 +1083,49 @@ export default function App() {
               </div>
 
               {/* Option 2: Delete All (Including Saved Statements) */}
-              <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 hover:border-rose-400 dark:hover:border-rose-700 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-bold text-rose-900 dark:text-rose-200">
-                      Clear Everything (Including Saved)
-                    </span>
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-200/80 dark:bg-rose-900/70 text-rose-800 dark:text-rose-200">
-                      {transactions.length + savedStatements.reduce((sum, s) => sum + s.transactions.length, 0)} total records
-                    </span>
+              <div className="p-4 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/40 dark:bg-rose-950/20 hover:border-rose-400 dark:hover:border-rose-700 transition-all flex flex-col gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold text-rose-900 dark:text-rose-200">
+                        Clear Everything (Including Saved)
+                      </span>
+                      <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-rose-200/80 dark:bg-rose-900/70 text-rose-800 dark:text-rose-200">
+                        {transactions.length + savedStatements.reduce((sum, s) => sum + s.transactions.length, 0)} total records
+                      </span>
+                    </div>
+                    <p className="text-xs text-rose-700/80 dark:text-rose-300/80 leading-relaxed max-w-sm">
+                      Permanently deletes all active transactions, active credit offsets, and all <span className="font-semibold">{savedStatements.length} saved statement{savedStatements.length === 1 ? '' : 's'}</span> ({savedStatements.reduce((sum, s) => sum + s.transactions.length, 0)} archived transactions). Resets the app to a blank workspace.
+                    </p>
                   </div>
-                  <p className="text-xs text-rose-700/80 dark:text-rose-300/80 leading-relaxed max-w-sm">
-                    Permanently deletes all active transactions, active credit offsets, and all <span className="font-semibold">{savedStatements.length} saved statement{savedStatements.length === 1 ? '' : 's'}</span> ({savedStatements.reduce((sum, s) => sum + s.transactions.length, 0)} archived transactions). Resets the app to a blank workspace.
-                  </p>
+                  <button
+                    type="button"
+                    disabled={transactions.length === 0 && savedStatements.length === 0 && (!clearRemainingBalanceOnAll || !hasRemainingBalances)}
+                    onClick={handleClearAllIncludingSaved}
+                    className="px-3.5 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors shrink-0 shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    Delete All Data
+                  </button>
                 </div>
-                <button
-                  type="button"
-                  disabled={transactions.length === 0 && savedStatements.length === 0}
-                  onClick={handleClearAllIncludingSaved}
-                  className="px-3.5 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-700 disabled:opacity-40 disabled:cursor-not-allowed text-white transition-colors shrink-0 shadow-xs cursor-pointer flex items-center justify-center gap-1.5"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  Delete All Data
-                </button>
+
+                {/* Remaining Balance Clearing Toggle */}
+                <div className="pt-2.5 border-t border-rose-200/70 dark:border-rose-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 text-xs font-semibold text-rose-950 dark:text-rose-200 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={clearRemainingBalanceOnAll}
+                      onChange={(e) => setClearRemainingBalanceOnAll(e.target.checked)}
+                      className="w-4 h-4 rounded text-rose-600 focus:ring-rose-500 border-rose-300 dark:border-rose-700 cursor-pointer"
+                    />
+                    <span>Also clear remaining balance cutoff baseline</span>
+                  </label>
+                  <span className="text-[11px] font-medium text-rose-800 dark:text-rose-300">
+                    {hasRemainingBalances
+                      ? `Active Cutoff: ${formatCurrency(totalRemaining)}`
+                      : 'None active ($0.00)'}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -1101,7 +1158,7 @@ export default function App() {
         onClear={handleClearRemainingBalances}
         currentNetByBucket={currentNetByBucket}
         savedStatementCount={savedStatements.length}
-        activeTransactionCount={transactions.length}
+        activeTransactionCount={activeTransactionsCount}
       />
     </div>
   );

@@ -24,6 +24,18 @@ export interface Transaction {
   statementName?: string; // Name of the statement (e.g. 'August_Statement.pdf')
   isDeleted?: boolean; // Soft deleted flag
   deletedAt?: string; // Timestamp when record was deleted
+  isManual?: boolean; // True if manually added by user
+}
+
+/**
+ * Checks whether a transaction was manually added by the user
+ */
+export function isManualTransaction(tx: { isManual?: boolean; id?: string; cardNumber?: string }): boolean {
+  return Boolean(
+    tx.isManual ||
+    (tx.id && tx.id.startsWith('manual_')) ||
+    (tx.cardNumber && tx.cardNumber.trim().toLowerCase() === 'manual')
+  );
 }
 
 export interface BucketTotals {
