@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Search,
   Filter,
@@ -23,30 +23,26 @@ import {
   Upload,
   LayoutList,
   Table,
+  RotateCcw,
+  Eye,
+  EyeOff,
+  AlertCircle,
+  AlertTriangle,
 } from 'lucide-react';
 import { CategoryType, Transaction } from '../types';
 import { formatCurrency } from '../utils/csvHelper';
-import { CATEGORY_COLORS, isPaymentOrCredit } from '../utils/rulesEngine';
+import { isPaymentOrCredit } from '../utils/rulesEngine';
 
 const RAW_CATEGORY_PALETTES: Record<string, string> = {
-  'gas/automotive': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-  'gas / automotive': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-  'automotive': 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
-  'grocery': 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
-  'merchandise': 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
-  'dining': 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
-  'entertainment': 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
-  'other services': 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
-  'services': 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800',
-  'other travel': 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
-  'travel': 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
-  'payment': 'bg-lime-50 dark:bg-lime-950/60 text-lime-700 dark:text-lime-300 border-lime-200 dark:border-lime-800',
-  'fee': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
+  merchandise: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800',
+  dining: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800',
+  travel: 'bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border-teal-200 dark:border-teal-800',
+  entertainment: 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800',
+  groceries: 'bg-lime-50 dark:bg-lime-950/60 text-lime-700 dark:text-lime-300 border-lime-200 dark:border-lime-800',
+  gasoline: 'bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border-orange-200 dark:border-orange-800',
+  healthcare: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-300 border-rose-200 dark:border-rose-800',
+  payment: 'bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800',
   'fee/interest charge': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
-  'interest charge': 'bg-red-50 dark:bg-red-950/60 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800',
-  'healthcare': 'bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border-cyan-200 dark:border-cyan-800',
-  'phone/cable': 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800',
-  'other': 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700',
 };
 
 const DYNAMIC_PALETTES = [
@@ -88,6 +84,8 @@ interface TransactionTableProps {
   onBulkUpdateCategory: (ids: string[], newCategory: CategoryType) => void;
   onDeleteTransaction: (id: string) => void;
   onDeleteBulkTransactions: (ids: string[]) => void;
+  onUndeleteTransaction: (id: string) => void;
+  onUndeleteBulkTransactions: (ids: string[]) => void;
   onAddTransaction: (newTx: Omit<Transaction, 'id'>) => void;
   onResetToDefaultRules: () => void;
   onClearAll?: () => void;
@@ -104,6 +102,8 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   onBulkUpdateCategory,
   onDeleteTransaction,
   onDeleteBulkTransactions,
+  onUndeleteTransaction,
+  onUndeleteBulkTransactions,
   onAddTransaction,
   onResetToDefaultRules,
   onClearAll,
@@ -117,6 +117,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCardFilter, setSelectedCardFilter] = useState('ALL');
   const [typeFilter, setTypeFilter] = useState<'ALL' | 'DEBIT' | 'CREDIT'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ACTIVE' | 'DELETED' | 'ALL'>('ACTIVE');
   const [sortBy, setSortBy] = useState<'category' | 'date' | 'description' | 'amount' | 'card'>('category');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
@@ -135,6 +136,10 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   const [newCredit, setNewCredit] = useState('');
   const [newCategory, setNewCategory] = useState<CategoryType>('Rachel');
 
+  // Counts of deleted and active transactions
+  const deletedCount = useMemo(() => transactions.filter((t) => t.isDeleted).length, [transactions]);
+  const activeCount = useMemo(() => transactions.filter((t) => !t.isDeleted).length, [transactions]);
+
   // Extract unique cards for filter
   const uniqueCards = useMemo(() => {
     const cards = Array.from(new Set(transactions.map((t) => t.cardNumber).filter(Boolean)));
@@ -145,6 +150,14 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
   const filteredTransactions = useMemo(() => {
     return transactions
       .filter((t) => {
+        // Filter by status: ACTIVE, DELETED, or ALL
+        if (statusFilter === 'ACTIVE' && t.isDeleted) {
+          return false;
+        }
+        if (statusFilter === 'DELETED' && !t.isDeleted) {
+          return false;
+        }
+
         // Search term filter
         if (searchTerm.trim()) {
           const s = searchTerm.toLowerCase();
@@ -179,24 +192,18 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
         return true;
       })
       .sort((a, b) => {
-        // Organize payments/credits to the bottom of the list
-        const aIsCredit = isPaymentOrCredit(a);
-        const bIsCredit = isPaymentOrCredit(b);
-
-        if (!aIsCredit && bIsCredit) return -1;
-        if (aIsCredit && !bIsCredit) return 1;
-
         let comp = 0;
         if (sortBy === 'category') {
-          const orderA = CATEGORY_ORDER[a.category] || 50;
-          const orderB = CATEGORY_ORDER[b.category] || 50;
-          comp = orderA - orderB;
+          const rankA = CATEGORY_ORDER[a.category] || 99;
+          const rankB = CATEGORY_ORDER[b.category] || 99;
+          comp = rankA - rankB;
           if (comp === 0) {
-            // Tiebreak within category by date descending
-            return b.transactionDate.localeCompare(a.transactionDate);
+            comp = (b.transactionDate || '').localeCompare(a.transactionDate || '');
           }
         } else if (sortBy === 'date') {
-          comp = a.transactionDate.localeCompare(b.transactionDate);
+          const dateA = a.transactionDate || a.postedDate || '';
+          const dateB = b.transactionDate || b.postedDate || '';
+          comp = dateA.localeCompare(dateB);
         } else if (sortBy === 'description') {
           comp = a.description.localeCompare(b.description);
         } else if (sortBy === 'card') {
@@ -209,7 +216,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
 
         return sortDirection === 'asc' ? comp : -comp;
       });
-  }, [transactions, searchTerm, selectedCategoryFilter, selectedCardFilter, typeFilter, sortBy, sortDirection]);
+  }, [transactions, statusFilter, searchTerm, selectedCategoryFilter, selectedCardFilter, typeFilter, sortBy, sortDirection]);
 
   // Pagination calculation
   const totalPages = Math.ceil(filteredTransactions.length / pageSize) || 1;
@@ -248,18 +255,38 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
     setSelectedIds(updated);
   };
 
+  // Selected items breakdown (active vs deleted)
+  const selectedList = useMemo(() => {
+    return filteredTransactions.filter((t) => selectedIds.has(t.id));
+  }, [filteredTransactions, selectedIds]);
+
+  const selectedActiveIds = useMemo(() => {
+    return selectedList.filter((t) => !t.isDeleted).map((t) => t.id);
+  }, [selectedList]);
+
+  const selectedDeletedIds = useMemo(() => {
+    return selectedList.filter((t) => t.isDeleted).map((t) => t.id);
+  }, [selectedList]);
+
   const handleBulkAssign = (cat: CategoryType) => {
-    if (selectedIds.size === 0) return;
-    onBulkUpdateCategory(Array.from(selectedIds), cat);
+    // Cannot assign bucket to deleted records
+    if (selectedActiveIds.length === 0) return;
+    onBulkUpdateCategory(selectedActiveIds, cat);
     setSelectedIds(new Set());
   };
 
   const handleBulkDelete = () => {
-    if (selectedIds.size === 0) return;
-    if (window.confirm(`Delete ${selectedIds.size} selected transaction(s)?`)) {
-      onDeleteBulkTransactions(Array.from(selectedIds));
+    if (selectedActiveIds.length === 0) return;
+    if (window.confirm(`Delete ${selectedActiveIds.length} selected record(s)?`)) {
+      onDeleteBulkTransactions(selectedActiveIds);
       setSelectedIds(new Set());
     }
+  };
+
+  const handleBulkUndelete = () => {
+    if (selectedDeletedIds.length === 0) return;
+    onUndeleteBulkTransactions(selectedDeletedIds);
+    setSelectedIds(new Set());
   };
 
   const handleAddSubmit = (e: React.FormEvent) => {
@@ -311,7 +338,14 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Showing {filteredTransactions.length} of {transactions.length} total transactions. Use the dropdown in each row to re-assign categories.
+              {statusFilter === 'DELETED' ? (
+                <>Showing {filteredTransactions.length} of {deletedCount} deleted records (excluded from totals).</>
+              ) : statusFilter === 'ALL' ? (
+                <>Showing {filteredTransactions.length} of {transactions.length} total records ({activeCount} active, {deletedCount} deleted).</>
+              ) : (
+                <>Showing {filteredTransactions.length} of {activeCount} active records{deletedCount > 0 && ` (${deletedCount} deleted hidden)`}.</>
+              )}
+              {' '}Use the dropdown in each row to re-assign categories.
             </p>
           </div>
 
@@ -355,6 +389,60 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               >
                 <Table className="w-3.5 h-3.5" />
                 <span>Table</span>
+              </button>
+            </div>
+
+            {/* Record Status Filter: Active / Deleted / All */}
+            <div className="inline-flex items-center p-0.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter('ACTIVE');
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  statusFilter === 'ACTIVE'
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="View active transactions (included in totals)"
+              >
+                Active ({activeCount})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter(statusFilter === 'DELETED' ? 'ACTIVE' : 'DELETED');
+                  setCurrentPage(1);
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  statusFilter === 'DELETED'
+                    ? 'bg-rose-600 text-white shadow-2xs font-bold'
+                    : deletedCount > 0
+                    ? 'bg-amber-100/70 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 hover:bg-amber-200/80 font-bold'
+                    : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                }`}
+                title={statusFilter === 'DELETED' ? 'Switch back to active records' : 'Show deleted records (excluded from totals)'}
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Deleted ({deletedCount})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter('ALL');
+                  setCurrentPage(1);
+                }}
+                className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  statusFilter === 'ALL'
+                    ? 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-2xs font-bold'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+                title="View all records (both active and deleted)"
+              >
+                All ({transactions.length})
               </button>
             </div>
 
@@ -436,7 +524,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     onSelectCategoryFilter(cat);
                     setCurrentPage(1);
                   }}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
                     isSelected
                       ? cat === 'Andrew'
                         ? 'bg-purple-600 text-white shadow-2xs'
@@ -462,7 +550,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                 setSelectedCardFilter(e.target.value);
                 setCurrentPage(1);
               }}
-              className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
               <option value="ALL">All Cards / Accounts ({transactions.length})</option>
               {uniqueCards.map((card) => {
@@ -488,7 +576,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                 setTypeFilter(e.target.value as any);
                 setCurrentPage(1);
               }}
-              className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              className="w-full px-3 py-2 text-xs sm:text-sm rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-slate-800 dark:text-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer"
             >
               <option value="ALL">All Types (Debit & Credit)</option>
               <option value="DEBIT">Debits Only</option>
@@ -497,45 +585,113 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           </div>
         </div>
 
+        {/* Deleted Records Banner Notice */}
+        {statusFilter === 'DELETED' && (
+          <div className="p-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2.5 text-rose-900 dark:text-rose-200">
+              <AlertCircle className="w-4 h-4 shrink-0 text-rose-600 dark:text-rose-400" />
+              <div>
+                <span className="font-bold">
+                  Viewing {filteredTransactions.length} of {deletedCount} Deleted Record{deletedCount === 1 ? '' : 's'}
+                </span>
+                <span className="text-rose-700/80 dark:text-rose-300/80 ml-1">
+                  (Excluded from spending totals & preserved across re-imports).
+                </span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+              {deletedCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onUndeleteBulkTransactions(
+                      transactions.filter((t) => t.isDeleted).map((t) => t.id)
+                    )
+                  }
+                  className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-bold transition-colors shadow-2xs cursor-pointer"
+                  title="Restore all deleted records back to active totals"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Undelete All ({deletedCount})</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setStatusFilter('ACTIVE');
+                  setCurrentPage(1);
+                }}
+                className="px-3 py-1.5 rounded-lg bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 font-semibold hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+              >
+                Back to Active ({activeCount})
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Batch Operations Bar (Visible when rows selected) */}
         {selectedIds.size > 0 && (
           <div className="flex flex-wrap items-center justify-between gap-3 p-3 bg-indigo-50 dark:bg-indigo-950/50 border border-indigo-200 dark:border-indigo-800/70 rounded-xl animate-fade-in">
             <div className="flex items-center gap-2 text-xs font-bold text-indigo-900 dark:text-indigo-200">
               <Check className="w-4 h-4 text-indigo-600" />
-              <span>{selectedIds.size} row(s) selected</span>
+              <span>
+                {selectedIds.size} row(s) selected
+                {selectedDeletedIds.length > 0 && ` (${selectedDeletedIds.length} deleted)`}
+              </span>
             </div>
 
             <div className="flex items-center flex-wrap gap-2">
-              <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Batch Assign:</span>
+              {selectedActiveIds.length > 0 && (
+                <>
+                  <span className="text-xs text-slate-600 dark:text-slate-400 font-medium">Batch Assign:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkAssign('Andrew')}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow-2xs cursor-pointer"
+                  >
+                    Andrew/Natalie
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkAssign('Rachel')}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-pink-400 hover:bg-pink-500 text-white shadow-2xs cursor-pointer"
+                  >
+                    Rachel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleBulkAssign('Leisure')}
+                    className="px-2.5 py-1 text-xs font-bold rounded-lg bg-sky-500 hover:bg-sky-600 text-white shadow-2xs cursor-pointer"
+                  >
+                    Leisure
+                  </button>
+                  <div className="h-4 w-px bg-indigo-200 dark:bg-indigo-700 mx-1" />
+                  <button
+                    type="button"
+                    onClick={handleBulkDelete}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/60 cursor-pointer"
+                    title="Delete selected active records"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Delete ({selectedActiveIds.length})</span>
+                  </button>
+                </>
+              )}
+              {selectedDeletedIds.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleBulkUndelete}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-2xs cursor-pointer"
+                  title="Restore selected deleted records"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Undelete ({selectedDeletedIds.length})</span>
+                </button>
+              )}
               <button
-                onClick={() => handleBulkAssign('Andrew')}
-                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-purple-600 hover:bg-purple-700 text-white shadow-2xs"
-              >
-                Andrew/Natalie
-              </button>
-              <button
-                onClick={() => handleBulkAssign('Rachel')}
-                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-pink-400 hover:bg-pink-500 text-white shadow-2xs"
-              >
-                Rachel
-              </button>
-              <button
-                onClick={() => handleBulkAssign('Leisure')}
-                className="px-2.5 py-1 text-xs font-bold rounded-lg bg-sky-500 hover:bg-sky-600 text-white shadow-2xs"
-              >
-                Leisure
-              </button>
-              <div className="h-4 w-px bg-indigo-200 dark:bg-indigo-700 mx-1" />
-              <button
-                onClick={handleBulkDelete}
-                className="p-1 text-xs font-semibold rounded-lg text-rose-600 hover:bg-rose-100 dark:hover:bg-rose-950/60"
-                title="Delete selected"
-              >
-                <Trash2 className="w-4 h-4" />
-              </button>
-              <button
+                type="button"
                 onClick={() => setSelectedIds(new Set())}
-                className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400"
+                className="text-xs text-slate-500 hover:text-slate-700 dark:text-slate-400 ml-1 cursor-pointer"
               >
                 Cancel
               </button>
@@ -568,19 +724,81 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           </div>
         ) : paginatedTransactions.length === 0 ? (
           <div className="text-center py-10 text-slate-400 dark:text-slate-500">
-            <SlidersHorizontal className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
-            <p className="font-semibold text-sm">No transactions match the selected filters</p>
-            <button
-              onClick={() => {
-                setSearchTerm('');
-                onSelectCategoryFilter('ALL');
-                setSelectedCardFilter('ALL');
-                setTypeFilter('ALL');
-              }}
-              className="mt-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-            >
-              Clear all filters
-            </button>
+            {statusFilter === 'DELETED' && deletedCount === 0 ? (
+              <div className="max-w-md mx-auto">
+                <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-3">
+                  <Trash2 className="w-6 h-6" />
+                </div>
+                <p className="font-bold text-sm text-slate-800 dark:text-slate-200">No Deleted Records</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  You currently have no deleted records. Click the trash icon on any transaction to remove it and exclude it from totals.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter('ACTIVE');
+                    setCurrentPage(1);
+                  }}
+                  className="mt-3 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs cursor-pointer"
+                >
+                  View Active Records ({activeCount})
+                </button>
+              </div>
+            ) : statusFilter === 'DELETED' && deletedCount > 0 ? (
+              <div className="max-w-md mx-auto">
+                <AlertTriangle className="w-8 h-8 mx-auto text-amber-500 mb-2" />
+                <p className="font-semibold text-sm text-slate-800 dark:text-slate-200">0 Deleted Records Match Current Filters</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  There {deletedCount === 1 ? 'is 1 deleted record' : `are ${deletedCount} deleted records`} in other categories or cards.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSearchTerm('');
+                    onSelectCategoryFilter('ALL');
+                    setSelectedCardFilter('ALL');
+                    setTypeFilter('ALL');
+                  }}
+                  className="mt-3 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                >
+                  Clear Filters to View All {deletedCount} Deleted Records
+                </button>
+              </div>
+            ) : (
+              <div>
+                <SlidersHorizontal className="w-8 h-8 mx-auto text-slate-300 dark:text-slate-600 mb-2" />
+                <p className="font-semibold text-sm">No transactions match the selected filters</p>
+                {deletedCount > 0 && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                    {deletedCount} deleted record{deletedCount === 1 ? '' : 's'} hidden in Deleted tab.
+                  </p>
+                )}
+                <div className="mt-2 flex items-center justify-center gap-3">
+                  <button
+                    onClick={() => {
+                      setSearchTerm('');
+                      onSelectCategoryFilter('ALL');
+                      setSelectedCardFilter('ALL');
+                      setTypeFilter('ALL');
+                    }}
+                    className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                  >
+                    Clear all filters
+                  </button>
+                  {deletedCount > 0 && (
+                    <button
+                      onClick={() => {
+                        setStatusFilter('DELETED');
+                        setCurrentPage(1);
+                      }}
+                      className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                    >
+                      View {deletedCount} Deleted Record{deletedCount === 1 ? '' : 's'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           paginatedTransactions.map((tx) => {
@@ -589,12 +807,16 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               <div
                 key={tx.id}
                 className={`p-3.5 rounded-xl border transition-all ${
-                  isSelected
+                  tx.isDeleted
+                    ? isSelected
+                      ? 'bg-rose-100/70 dark:bg-rose-950/50 border-rose-300 dark:border-rose-700 shadow-2xs border-dashed'
+                      : 'bg-rose-50/20 dark:bg-rose-950/15 border-rose-200 dark:border-rose-900/60 shadow-2xs border-dashed opacity-85'
+                    : isSelected
                     ? 'bg-indigo-50/80 dark:bg-indigo-950/40 border-indigo-300 dark:border-indigo-700 shadow-2xs'
                     : 'bg-white dark:bg-slate-800/90 border-slate-200 dark:border-slate-800 shadow-2xs'
                 }`}
               >
-                {/* Card Top: Checkbox, Date, Card Badge, Category Badge */}
+                {/* Card Top: Checkbox, Date, Badges, Delete / Undelete button */}
                 <div className="flex items-center justify-between gap-2 mb-1.5">
                   <div className="flex items-center gap-2">
                     <input
@@ -603,7 +825,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                       onChange={() => handleToggleSelectRow(tx.id)}
                       className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
                     />
-                    <span className="font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    <span
+                      className={`font-mono text-xs font-semibold ${
+                        tx.isDeleted
+                          ? 'line-through text-slate-400 dark:text-slate-500'
+                          : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
                       {tx.transactionDate}
                     </span>
                     {tx.postedDate && tx.postedDate !== tx.transactionDate && (
@@ -612,6 +840,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                   </div>
 
                   <div className="flex items-center flex-wrap gap-1.5 justify-end">
+                    {/* Deleted Badge */}
+                    {tx.isDeleted && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                        Deleted
+                      </span>
+                    )}
+
                     {/* Card Badge */}
                     {tx.cardNumber && (
                       <span
@@ -649,11 +884,39 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                         {tx.rawCategory || tx.category}
                       </span>
                     )}
+
+                    {/* Row Action: Delete or Undelete */}
+                    {tx.isDeleted ? (
+                      <button
+                        type="button"
+                        onClick={() => onUndeleteTransaction(tx.id)}
+                        className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-md bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors cursor-pointer ml-1"
+                        title="Undelete record and restore to totals"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Undelete</span>
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onDeleteTransaction(tx.id)}
+                        className="p-1 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 transition-colors cursor-pointer ml-1"
+                        title="Delete record from analysis and totals"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 {/* Full Vendor Name - Completely visible with NO truncation or clamping */}
-                <div className="text-sm sm:text-base font-bold text-slate-900 dark:text-white break-words leading-snug py-1">
+                <div
+                  className={`text-sm sm:text-base font-bold break-words leading-snug py-1 ${
+                    tx.isDeleted
+                      ? 'line-through text-slate-400 dark:text-slate-500'
+                      : 'text-slate-900 dark:text-white'
+                  }`}
+                >
                   {tx.description}
                 </div>
 
@@ -681,7 +944,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     {tx.debit > 0 && (
                       <div className="flex items-baseline gap-1">
                         <span className="text-[11px] text-slate-400 font-medium">Debit:</span>
-                        <span className="font-mono font-bold text-sm sm:text-base text-slate-900 dark:text-white">
+                        <span
+                          className={`font-mono font-bold text-sm sm:text-base ${
+                            tx.isDeleted
+                              ? 'line-through text-slate-400 dark:text-slate-500'
+                              : 'text-slate-900 dark:text-white'
+                          }`}
+                        >
                           {formatCurrency(tx.debit)}
                         </span>
                       </div>
@@ -689,7 +958,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     {tx.credit > 0 && (
                       <div className="flex items-baseline gap-1">
                         <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">Credit:</span>
-                        <span className="font-mono font-bold text-sm sm:text-base text-emerald-600 dark:text-emerald-400">
+                        <span
+                          className={`font-mono font-bold text-sm sm:text-base ${
+                            tx.isDeleted
+                              ? 'line-through text-slate-400 dark:text-slate-500'
+                              : 'text-emerald-600 dark:text-emerald-400'
+                          }`}
+                        >
                           +{formatCurrency(tx.credit)}
                         </span>
                       </div>
@@ -700,12 +975,20 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     <select
                       value={tx.category}
                       onChange={(e) => onUpdateCategory(tx.id, e.target.value as CategoryType)}
-                      className={`w-full appearance-none pl-3 pr-8 py-2 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold border transition-all cursor-pointer shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 ${
-                        tx.category === 'Andrew'
-                          ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+                      disabled={tx.isDeleted}
+                      title={
+                        tx.isDeleted
+                          ? 'Cannot change bucket while record is deleted. Undelete this record first.'
+                          : undefined
+                      }
+                      className={`w-full appearance-none pl-3 pr-8 py-2 min-h-[44px] rounded-xl text-xs sm:text-sm font-bold border transition-all shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 ${
+                        tx.isDeleted
+                          ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
+                          : tx.category === 'Andrew'
+                          ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 cursor-pointer'
                           : tx.category === 'Rachel'
-                          ? 'bg-pink-50/80 dark:bg-pink-950/40 text-pink-500 dark:text-pink-300 border-pink-200 dark:border-pink-800/80'
-                          : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800'
+                          ? 'bg-pink-50/80 dark:bg-pink-950/40 text-pink-500 dark:text-pink-300 border-pink-200 dark:border-pink-800/80 cursor-pointer'
+                          : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800 cursor-pointer'
                       }`}
                     >
                       <option value="Andrew" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-medium">
@@ -785,12 +1068,15 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                   <ArrowUpDown className="w-3 h-3 text-slate-400" />
                 </div>
               </th>
+              <th className="py-3.5 pr-4 pl-2 text-right">
+                <span>Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {transactions.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-12 text-slate-500 dark:text-slate-400">
+                <td colSpan={7} className="text-center py-12 text-slate-500 dark:text-slate-400">
                   <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto">
                     <div className="w-12 h-12 rounded-full bg-indigo-50 dark:bg-indigo-950/60 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                       <FileText className="w-6 h-6" />
@@ -814,22 +1100,82 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               </tr>
             ) : paginatedTransactions.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center py-12 text-slate-400 dark:text-slate-500">
-                  <div className="flex flex-col items-center justify-center gap-2">
-                    <SlidersHorizontal className="w-8 h-8 text-slate-300 dark:text-slate-600" />
-                    <p className="font-semibold text-sm">No transactions match the selected filters</p>
-                    <button
-                      onClick={() => {
-                        setSearchTerm('');
-                        onSelectCategoryFilter('ALL');
-                        setSelectedCardFilter('ALL');
-                        setTypeFilter('ALL');
-                      }}
-                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
-                    >
-                      Clear all filters
-                    </button>
-                  </div>
+                <td colSpan={7} className="text-center py-12 text-slate-400 dark:text-slate-500">
+                  {statusFilter === 'DELETED' && deletedCount === 0 ? (
+                    <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto">
+                      <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400 mb-1">
+                        <Trash2 className="w-6 h-6" />
+                      </div>
+                      <p className="font-bold text-sm text-slate-800 dark:text-slate-200">No Deleted Records</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
+                        You currently have no deleted records. Click the trash icon (<Trash2 className="w-3 h-3 inline text-rose-500" />) on any transaction row in the Active view to exclude it from totals.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusFilter('ACTIVE');
+                          setCurrentPage(1);
+                        }}
+                        className="mt-2 inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white shadow-2xs cursor-pointer"
+                      >
+                        View Active Records ({activeCount})
+                      </button>
+                    </div>
+                  ) : statusFilter === 'DELETED' && deletedCount > 0 ? (
+                    <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto">
+                      <AlertTriangle className="w-8 h-8 text-amber-500 mb-1" />
+                      <p className="font-semibold text-sm text-slate-800 dark:text-slate-200">0 Deleted Records Match Current Filters</p>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 text-center">
+                        There {deletedCount === 1 ? 'is 1 deleted record' : `are ${deletedCount} deleted records`} in other categories or cards.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSearchTerm('');
+                          onSelectCategoryFilter('ALL');
+                          setSelectedCardFilter('ALL');
+                          setTypeFilter('ALL');
+                        }}
+                        className="mt-2 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-bold rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white cursor-pointer"
+                      >
+                        Clear Filters to View All {deletedCount} Deleted Records
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center justify-center gap-2">
+                      <SlidersHorizontal className="w-8 h-8 text-slate-300 dark:text-slate-600" />
+                      <p className="font-semibold text-sm">No transactions match the selected filters</p>
+                      {deletedCount > 0 && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400">
+                          {deletedCount} deleted record{deletedCount === 1 ? '' : 's'} are hidden in the Deleted tab.
+                        </p>
+                      )}
+                      <div className="mt-1 flex items-center justify-center gap-3">
+                        <button
+                          onClick={() => {
+                            setSearchTerm('');
+                            onSelectCategoryFilter('ALL');
+                            setSelectedCardFilter('ALL');
+                            setTypeFilter('ALL');
+                          }}
+                          className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline cursor-pointer"
+                        >
+                          Clear all filters
+                        </button>
+                        {deletedCount > 0 && (
+                          <button
+                            onClick={() => {
+                              setStatusFilter('DELETED');
+                              setCurrentPage(1);
+                            }}
+                            className="text-xs font-bold text-rose-600 dark:text-rose-400 hover:underline cursor-pointer"
+                          >
+                            View {deletedCount} Deleted Record{deletedCount === 1 ? '' : 's'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </td>
               </tr>
             ) : (
@@ -840,7 +1186,11 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                   <tr
                     key={tx.id}
                     className={`group transition-colors ${
-                      isSelected
+                      tx.isDeleted
+                        ? isSelected
+                          ? 'bg-rose-100/60 dark:bg-rose-950/60'
+                          : 'bg-rose-50/40 dark:bg-rose-950/20 hover:bg-rose-50/70 dark:hover:bg-rose-950/30'
+                        : isSelected
                         ? 'bg-indigo-50/70 dark:bg-indigo-950/40'
                         : 'hover:bg-slate-50/80 dark:hover:bg-slate-800/40'
                     }`}
@@ -856,8 +1206,10 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     </td>
 
                     {/* Date */}
-                    <td className="py-3 px-3 whitespace-nowrap text-slate-600 dark:text-slate-400 font-mono text-xs">
-                      <div>{tx.transactionDate}</div>
+                    <td className="py-3 px-3 whitespace-nowrap font-mono text-xs">
+                      <div className={tx.isDeleted ? 'line-through text-slate-400 dark:text-slate-500' : 'text-slate-600 dark:text-slate-400'}>
+                        {tx.transactionDate}
+                      </div>
                       {tx.postedDate && tx.postedDate !== tx.transactionDate && (
                         <div className="text-[10px] text-slate-400">Post: {tx.postedDate}</div>
                       )}
@@ -865,10 +1217,23 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
 
                     {/* Description - Unconstrained with full vendor name wrapping */}
                     <td className="py-3 px-3">
-                      <div className="font-semibold text-slate-900 dark:text-white break-words whitespace-normal min-w-[200px] leading-snug">
+                      <div
+                        className={`font-semibold break-words whitespace-normal min-w-[200px] leading-snug ${
+                          tx.isDeleted
+                            ? 'line-through text-slate-400 dark:text-slate-500'
+                            : 'text-slate-900 dark:text-white'
+                        }`}
+                      >
                         {tx.description}
                       </div>
                       <div className="flex items-center flex-wrap gap-1.5 mt-1">
+                        {/* Deleted Badge */}
+                        {tx.isDeleted && (
+                          <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-bold rounded-md bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                            Deleted
+                          </span>
+                        )}
+
                         {/* Record Title / Card Badge */}
                         {tx.cardNumber && (
                           <span
@@ -926,27 +1291,47 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                     </td>
 
                     {/* Debit */}
-                    <td className="py-3 px-3 text-right font-mono font-semibold text-slate-900 dark:text-white">
+                    <td
+                      className={`py-3 px-3 text-right font-mono font-semibold ${
+                        tx.isDeleted
+                          ? 'line-through text-slate-400 dark:text-slate-500'
+                          : 'text-slate-900 dark:text-white'
+                      }`}
+                    >
                       {tx.debit > 0 ? formatCurrency(tx.debit) : '—'}
                     </td>
 
                     {/* Credit */}
-                    <td className="py-3 px-3 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                    <td
+                      className={`py-3 px-3 text-right font-mono font-semibold ${
+                        tx.isDeleted
+                          ? 'line-through text-slate-400 dark:text-slate-500'
+                          : 'text-emerald-600 dark:text-emerald-400'
+                      }`}
+                    >
                       {tx.credit > 0 ? formatCurrency(tx.credit) : '—'}
                     </td>
 
-                    {/* Categorization Dropdown (Core Requirement) */}
-                    <td className="py-3 pr-4 pl-3">
+                    {/* Categorization Dropdown (Core Requirement - Disabled while deleted) */}
+                    <td className="py-3 px-3">
                       <div className="relative inline-block w-36">
                         <select
                           value={tx.category}
                           onChange={(e) => onUpdateCategory(tx.id, e.target.value as CategoryType)}
-                          className={`w-full appearance-none pl-3 pr-8 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-2xs focus:outline-none focus:ring-2 focus:ring-indigo-500 ${
-                            tx.category === 'Andrew'
-                              ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800'
+                          disabled={tx.isDeleted}
+                          title={
+                            tx.isDeleted
+                              ? 'Cannot change bucket while record is deleted. Undelete this record first.'
+                              : undefined
+                          }
+                          className={`w-full appearance-none pl-3 pr-8 py-1.5 rounded-xl text-xs font-bold border transition-all shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-indigo-500 ${
+                            tx.isDeleted
+                              ? 'opacity-50 cursor-not-allowed bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 border-slate-200 dark:border-slate-700'
+                              : tx.category === 'Andrew'
+                              ? 'bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border-purple-300 dark:border-purple-800 cursor-pointer'
                               : tx.category === 'Rachel'
-                              ? 'bg-pink-50/80 dark:bg-pink-950/40 text-pink-500 dark:text-pink-300 border-pink-200 dark:border-pink-800/80'
-                              : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800'
+                              ? 'bg-pink-50/80 dark:bg-pink-950/40 text-pink-500 dark:text-pink-300 border-pink-200 dark:border-pink-800/80 cursor-pointer'
+                              : 'bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border-sky-300 dark:border-sky-800 cursor-pointer'
                           }`}
                         >
                           <option value="Andrew" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-300 font-medium">
@@ -961,6 +1346,30 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                         </select>
                         <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none opacity-60" />
                       </div>
+                    </td>
+
+                    {/* Actions Column: Delete / Undelete */}
+                    <td className="py-3 pr-4 pl-2 text-right whitespace-nowrap">
+                      {tx.isDeleted ? (
+                        <button
+                          type="button"
+                          onClick={() => onUndeleteTransaction(tx.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-bold rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 transition-colors shadow-2xs cursor-pointer"
+                          title="Undelete this record (restore to totals)"
+                        >
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Undelete</span>
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => onDeleteTransaction(tx.id)}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/60 transition-colors cursor-pointer"
+                          title="Delete record (removes from totals)"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );
@@ -990,7 +1399,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           </select>
           <span className="ml-2">
             Showing {(currentPage - 1) * pageSize + 1} -{' '}
-            {Math.min(currentPage * pageSize, filteredTransactions.length)} of {filteredTransactions.length}
+            {Math.min(currentPage * pageSize, filteredTransactions.length)} of {filteredTransactions.length} {statusFilter === 'DELETED' ? 'deleted records' : statusFilter === 'ALL' ? 'total records' : 'active records'}
           </span>
         </div>
 
@@ -998,7 +1407,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           <button
             onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
             disabled={currentPage === 1}
-            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
@@ -1008,7 +1417,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
           <button
             onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
-            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 disabled:opacity-30 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
@@ -1026,7 +1435,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
               </h4>
               <button
                 onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1109,7 +1518,7 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                 <select
                   value={newCategory}
                   onChange={(e) => setNewCategory(e.target.value as CategoryType)}
-                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold"
+                  className="w-full px-3 py-2 text-sm rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white font-semibold cursor-pointer"
                 >
                   <option value="Andrew">Andrew/Natalie</option>
                   <option value="Rachel">Rachel</option>
@@ -1121,13 +1530,13 @@ export const TransactionTable: React.FC<TransactionTableProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200"
+                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 cursor-pointer"
                 >
                   Add Transaction
                 </button>

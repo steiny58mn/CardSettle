@@ -11,6 +11,14 @@ import { Transaction, CategoryType, CategorySummary, CreditOverrides, SavedState
 import { parseCSVData, getSampleCSVString, exportTransactionsToCSV, exportSummariesToCSV, formatCurrency } from './utils/csvHelper';
 import { calculateStatementTotals, calculateCarriedOverTotals } from './utils/statementHelper';
 import {
+  applyDeletedSignatures,
+  saveDeletedSignature,
+  saveDeletedSignatures,
+  removeDeletedSignature,
+  removeDeletedSignatures,
+  clearDeletedSignatures,
+} from './utils/deletionHelper';
+import {
   determineDefaultCategory,
   CATEGORY_COLORS,
   saveManualOverride,
@@ -35,7 +43,25 @@ const ACTIVE_STATEMENT_NAME_KEY = 'credit_card_analyzer_active_statement_name';
 const THEME_KEY = 'credit_card_analyzer_theme';
 
 export default function App() {
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return applyDeletedSignatures(parsed);
+        }
+      } else {
+        // First ever visit: load sample CSV dataset
+        const sample = getSampleCSVString();
+        const { transactions: sampleTx } = parseCSVData(sample);
+        return applyDeletedSignatures(sampleTx);
+      }
+    } catch (e) {
+      console.error('Failed to parse saved transactions from localStorage', e);
+    }
+    return [];
+  });
   const [creditOverrides, setCreditOverrides] = useState<CreditOverrides>(() => getCreditOverrides());
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('ALL');
   const [isRulesModalOpen, setIsRulesModalOpen] = useState(false);
@@ -100,26 +126,6 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Load initial data from localStorage, or load sample data on initial first start
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved !== null) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          setTransactions(parsed);
-        }
-      } else {
-        // First ever visit: load sample CSV dataset
-        const sample = getSampleCSVString();
-        const { transactions: sampleTx } = parseCSVData(sample);
-        setTransactions(sampleTx);
-      }
-    } catch (e) {
-      console.error('Failed to parse saved transactions from localStorage', e);
-    }
-  }, []);
-
   // Save active transactions to localStorage
   useEffect(() => {
     try {
@@ -176,6 +182,12 @@ export default function App() {
       setToastMessage((current) => (current === msg ? null : current));
     }, 4500);
   };
+
+  // Active (non-deleted) count
+  const activeTransactionsCount = useMemo(
+    () => transactions.filter((t) => !t.isDeleted).length,
+    [transactions]
+  );
 
   // Compute calculated metrics for active workspace
   const activeTotals = useMemo(() => {
@@ -343,7 +355,7 @@ export default function App() {
   };
 
   const executeReopenStatement = (target: SavedStatement) => {
-    setTransactions(target.transactions);
+    setTransactions(applyDeletedSignatures(target.transactions));
     setCreditOverrides(target.creditOverrides || {});
     setActiveStatementName(target.name);
     // Remove from saved statements while active so it is not double-counted in carried totals
@@ -429,7 +441,8 @@ export default function App() {
   // Import handler: when a new PDF or CSV is loaded, set active statement name,
   // replace active transactions, reset active credit overrides (while carried over statements stay locked)
   const handleImportSuccess = (newTx: Transaction[], fileName?: string) => {
-    setTransactions(newTx);
+    const preparedTx = applyDeletedSignatures(newTx);
+    setTransactions(preparedTx);
     if (fileName) {
       const cleanName = fileName.replace(/\.(csv|pdf|txt)$/i, '');
       setActiveStatementName(cleanName);
@@ -441,14 +454,15 @@ export default function App() {
     clearCreditOverrides();
     setCreditOverrides({});
 
+    const activeCount = preparedTx.filter((t) => !t.isDeleted).length;
+    const deletedCount = preparedTx.length - activeCount;
+
     if (savedStatements.length > 0) {
       showToast(
-        `Loaded ${newTx.length} transactions from ${fileName || 'new file'}. Prior totals ($${carriedOverTotals.totalNetSpend.toFixed(
-          2
-        )} net) are safely carried over!`
+        `Loaded ${activeCount} active transactions${deletedCount > 0 ? ` (${deletedCount} previously deleted excluded)` : ''} from ${fileName || 'new file'}. Prior totals (${formatCurrency(carriedOverTotals.totalNetSpend)} net) are safely carried over!`
       );
     } else {
-      showToast(`Loaded ${newTx.length} transactions from ${fileName || 'file'}.`);
+      showToast(`Loaded ${activeCount} active transactions${deletedCount > 0 ? ` (${deletedCount} previously deleted excluded)` : ''} from ${fileName || 'file'}.`);
     }
 
     // Scroll to ledger so user immediately sees their imported data
@@ -460,6 +474,12 @@ export default function App() {
   // Update single category from dropdown (Live reactivity active & remembered for next PDF/CSV load)
   const handleUpdateCategory = useCallback((id: string, newCategory: CategoryType) => {
     const target = transactions.find((t) => t.id === id);
+
+    // Guard: don't allow bucket to change while deleted
+    if (target?.isDeleted) {
+      showToast('Cannot change bucket while record is deleted. Undelete this record first.');
+      return;
+    }
 
     // If this transaction has a credit, clear any stale manual overrides on Leisure or Andrew
     // so that the category credit cleanly flows into the auto transaction calculation
@@ -500,12 +520,12 @@ export default function App() {
   const handleBulkUpdateCategory = useCallback((ids: string[], newCategory: CategoryType) => {
     const idSet = new Set(ids);
     setTransactions((prev) => {
-      const targets = prev.filter((t) => idSet.has(t.id));
+      const targets = prev.filter((t) => idSet.has(t.id) && !t.isDeleted);
       if (targets.length > 0) {
         saveManualOverrides(targets, newCategory);
       }
       return prev.map((t) =>
-        idSet.has(t.id)
+        idSet.has(t.id) && !t.isDeleted
           ? {
               ...t,
               category: newCategory,
@@ -517,17 +537,63 @@ export default function App() {
     showToast(`Bulk updated & remembered ${ids.length} transactions for ${newCategory === 'Andrew' ? 'Andrew/Natalie' : newCategory}`);
   }, []);
 
-  // Delete transaction
+  // Delete transaction (removes from totals and remembers signature so re-imports stay deleted)
   const handleDeleteTransaction = useCallback((id: string) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id));
-    showToast('Transaction removed.');
+    setTransactions((prev) => {
+      const target = prev.find((t) => t.id === id);
+      if (target) {
+        saveDeletedSignature(target);
+      }
+      return prev.map((t) =>
+        t.id === id ? { ...t, isDeleted: true, deletedAt: new Date().toISOString() } : t
+      );
+    });
+    showToast('Record deleted (excluded from totals).');
   }, []);
 
   // Bulk delete
   const handleDeleteBulkTransactions = useCallback((ids: string[]) => {
     const idSet = new Set(ids);
-    setTransactions((prev) => prev.filter((t) => !idSet.has(t.id)));
-    showToast(`Deleted ${ids.length} transactions.`);
+    setTransactions((prev) => {
+      const targets = prev.filter((t) => idSet.has(t.id));
+      if (targets.length > 0) {
+        saveDeletedSignatures(targets);
+      }
+      const now = new Date().toISOString();
+      return prev.map((t) =>
+        idSet.has(t.id) ? { ...t, isDeleted: true, deletedAt: now } : t
+      );
+    });
+    showToast(`Deleted ${ids.length} records (excluded from totals).`);
+  }, []);
+
+  // Undelete transaction (restores to totals and removes signature so re-imports won't be deleted)
+  const handleUndeleteTransaction = useCallback((id: string) => {
+    setTransactions((prev) => {
+      const target = prev.find((t) => t.id === id);
+      if (target) {
+        removeDeletedSignature(target);
+      }
+      return prev.map((t) =>
+        t.id === id ? { ...t, isDeleted: false, deletedAt: undefined } : t
+      );
+    });
+    showToast('Record undeleted and restored to totals.');
+  }, []);
+
+  // Bulk undelete
+  const handleUndeleteBulkTransactions = useCallback((ids: string[]) => {
+    const idSet = new Set(ids);
+    setTransactions((prev) => {
+      const targets = prev.filter((t) => idSet.has(t.id));
+      if (targets.length > 0) {
+        removeDeletedSignatures(targets);
+      }
+      return prev.map((t) =>
+        idSet.has(t.id) ? { ...t, isDeleted: false, deletedAt: undefined } : t
+      );
+    });
+    showToast(`Restored ${ids.length} records to totals.`);
   }, []);
 
   // Add transaction
@@ -603,6 +669,7 @@ export default function App() {
     clearCreditOverrides();
     setCreditOverrides({});
     clearManualOverrides();
+    clearDeletedSignatures();
     setActiveStatementName('Statement 1');
     setIsClearConfirmOpen(false);
     showToast(`Cleared all ${totalTx} transactions across active workspace and ${totalStmts} saved statement${totalStmts === 1 ? '' : 's'}.`);
@@ -614,7 +681,7 @@ export default function App() {
     const { transactions: sampleTx } = parseCSVData(sample);
     clearCreditOverrides();
     setCreditOverrides({});
-    setTransactions(sampleTx);
+    setTransactions(applyDeletedSignatures(sampleTx));
     setActiveStatementName('August 2026 Statement');
     showToast(`Loaded sample dataset with ${sampleTx.length} transactions.`);
   };
@@ -642,7 +709,7 @@ export default function App() {
     let totalAllocated = 0;
 
     const summaries: CategorySummary[] = categories.map((cat) => {
-      const txs = transactions.filter((t) => t.category === cat);
+      const txs = transactions.filter((t) => !t.isDeleted && t.category === cat);
       const catDebit = txs.reduce((sum, t) => sum + (t.debit || 0), 0);
       const catCredit = txs.reduce((sum, t) => sum + (t.credit || 0), 0);
       const allocatedCredit = activeTotals[cat.toLowerCase() as 'andrew' | 'rachel' | 'leisure']?.allocatedCredit ?? catCredit;
@@ -687,7 +754,7 @@ export default function App() {
 
       {/* Top Navbar with Upload Statement Button */}
       <Navbar
-        transactionCount={transactions.length}
+        transactionCount={activeTransactionsCount}
         onOpenRules={() => setIsRulesModalOpen(true)}
         onOpenUploadModal={() => setIsUploadModalOpen(true)}
         onLoadSample={handleLoadSample}
@@ -714,7 +781,7 @@ export default function App() {
             onDeleteStatement={handleDeleteSavedStatement}
             onClearAllSaved={handleClearAllSaved}
             onSaveCurrentStatement={handleOpenSaveModal}
-            activeTransactionCount={transactions.length}
+            activeTransactionCount={activeTransactionsCount}
             onRenameStatement={handleRenameSavedStatement}
           />
         </div>
@@ -727,7 +794,7 @@ export default function App() {
                 Transactions Ledger
               </h2>
               <span className="text-xs px-2.5 py-0.5 rounded-full font-bold bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300">
-                {transactions.length} Records
+                {activeTransactionsCount} Records
               </span>
             </div>
           </div>
@@ -738,6 +805,8 @@ export default function App() {
             onBulkUpdateCategory={handleBulkUpdateCategory}
             onDeleteTransaction={handleDeleteTransaction}
             onDeleteBulkTransactions={handleDeleteBulkTransactions}
+            onUndeleteTransaction={handleUndeleteTransaction}
+            onUndeleteBulkTransactions={handleUndeleteBulkTransactions}
             onAddTransaction={handleAddTransaction}
             onResetToDefaultRules={handleResetToDefaultRules}
             onClearAll={(transactions.length > 0 || savedStatements.length > 0) ? handlePromptClearAll : undefined}

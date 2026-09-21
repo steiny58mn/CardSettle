@@ -20,6 +20,8 @@ export interface Transaction {
   isManuallyChanged?: boolean;
   statementId?: string; // ID of the statement it belongs to
   statementName?: string; // Name of the statement (e.g. 'August_Statement.pdf')
+  isDeleted?: boolean; // Soft deleted flag
+  deletedAt?: string; // Timestamp when record was deleted
 }
 
 export interface BucketTotals {
@@ -81,15 +83,4 @@ export interface MonthlySpend {
   rachel: number;
   leisure: number;
   total: number;
-}
-
-export interface FilterOptions {
-  searchQuery: string;
-  category: string; // 'ALL' | CategoryType
-  cardNumber: string; // 'ALL' | specific card
-  dateFrom: string;
-  dateTo: string;
-  minAmount: string;
-  maxAmount: string;
-  type: 'ALL' | 'DEBIT' | 'CREDIT';
 }

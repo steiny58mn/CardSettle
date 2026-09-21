@@ -175,7 +175,8 @@ export function getSampleCSVString(): string {
  * Export full categorized transactions to CSV
  */
 export function exportTransactionsToCSV(transactions: Transaction[], filename = 'categorized_transactions.csv') {
-  const exportData = transactions.map((t) => ({
+  const activeTransactions = transactions.filter((t) => !t.isDeleted);
+  const exportData = activeTransactions.map((t) => ({
     'Transaction Date': t.transactionDate,
     'Posted Date': t.postedDate,
     'Card No.': t.cardNumber,

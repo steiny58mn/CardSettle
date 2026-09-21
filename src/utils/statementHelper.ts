@@ -4,7 +4,8 @@ export const SAVED_STATEMENTS_KEY = 'credit_card_analyzer_saved_statements';
 export const ACTIVE_STATEMENT_NAME_KEY = 'credit_card_analyzer_active_statement_name';
 
 /**
- * Calculates bucket-by-bucket and overall totals for a set of transactions and overrides
+ * Calculates bucket-by-bucket and overall totals for a set of transactions and overrides.
+ * Excludes soft-deleted transactions so totals remain accurate.
  */
 export function calculateStatementTotals(
   transactions: Transaction[],
@@ -19,7 +20,9 @@ export function calculateStatementTotals(
     leisure: { debit: 0, credit: 0, count: 0 },
   };
 
-  transactions.forEach((tx) => {
+  const activeTransactions = transactions.filter((tx) => !tx.isDeleted);
+
+  activeTransactions.forEach((tx) => {
     totalDebit += tx.debit;
     totalCredit += tx.credit;
 
@@ -66,7 +69,7 @@ export function calculateStatementTotals(
     totalCredit: Math.round(totalCredit * 100) / 100,
     totalAllocatedCredit: Math.round(totalAllocatedCredit * 100) / 100,
     totalNetSpend: Math.round(totalNetSpend * 100) / 100,
-    count: transactions.length,
+    count: activeTransactions.length,
     andrew: {
       debit: Math.round(buckets.andrew.debit * 100) / 100,
       credit: Math.round(buckets.andrew.credit * 100) / 100,

@@ -66,6 +66,11 @@ export const Dashboard: React.FC<DashboardProps> = ({
     return calculateCarriedOverTotals(savedStatements || []);
   }, [savedStatements]);
 
+  // Only active (non-deleted) transactions contribute to totals, metrics, and charts
+  const activeTransactions = useMemo(() => {
+    return transactions.filter((t) => !t.isDeleted);
+  }, [transactions]);
+
   // Compute category summaries dynamically from categorized transactions & credit overrides
   const {
     summaries,
@@ -88,7 +93,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
     const cardMap: Record<string, { debit: number; credit: number; count: number; categories: Record<string, number> }> = {};
     const monthMap: Record<string, { andrew: number; rachel: number; leisure: number; total: number }> = {};
 
-    transactions.forEach((tx) => {
+    activeTransactions.forEach((tx) => {
       tDebit += tx.debit;
       tCredit += tx.credit;
 
@@ -161,7 +166,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       s.percentage = calculatedTotalNet > 0
         ? (s.netSpend / calculatedTotalNet) * 100
         : s.count > 0
-        ? (s.count / (transactions.length || 1)) * 100
+        ? (s.count / (activeTransactions.length || 1)) * 100
         : 0;
     });
 
@@ -190,7 +195,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       cardBreakdown: cardList,
       monthlyBreakdown: sortedMonths,
     };
-  }, [transactions, overrides]);
+  }, [activeTransactions, overrides]);
 
   // Compute stats per category
   const andrewSummary = summaries.find((s) => s.category === 'Andrew');
@@ -262,7 +267,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleTransferCreditToLeisure = (amountToAdd: number) => {
-    if (transactions.length === 0 && !hasSavedStatements) {
+    if (activeTransactions.length === 0 && !hasSavedStatements) {
       alert("No statement is currently loaded to allocate credits. Please upload a statement first.");
       return;
     }
@@ -340,7 +345,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
       };
     }
 
-    if (displayScope === 'carried' || transactions.length === 0) {
+    if (displayScope === 'carried' || activeTransactions.length === 0) {
       return {
         totalNet: carriedOverTotals.totalNetSpend,
         totalDebit: carriedOverTotals.totalDebit,
@@ -389,7 +394,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   }, [
     hasSavedStatements,
     displayScope,
-    transactions.length,
+    activeTransactions.length,
     totalNet,
     totalDebit,
     totalCredit,
@@ -425,7 +430,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
 
   // Auto-apply remaining unapplied statement credits to any of the 3 buckets
   const handleAutoApplyUnapplied = (cat: CategoryType) => {
-    if (transactions.length === 0) {
+    if (activeTransactions.length === 0) {
       alert("No active statement is currently open to allocate credits. Please upload or reopen a statement first.");
       return;
     }
@@ -500,7 +505,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
   };
 
   const handleExportAll = () => {
-    exportTransactionsToCSV(transactions);
+    exportTransactionsToCSV(activeTransactions);
   };
 
   // SVG Pie / Donut calculation
@@ -916,12 +921,12 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   <strong className="text-emerald-600 dark:text-emerald-400 font-bold">
                     {formatCurrency(effectiveTotals.totalCredit)}
                   </strong>
-                  {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                     <span className="text-slate-500 dark:text-slate-400 font-normal">
                       {' '}({formatCurrency(carriedOverTotals.totalCredit)} carried over from {savedStatements.length} saved statement{savedStatements.length > 1 ? 's' : ''} + {formatCurrency(totalCredit)} from active file)
                     </span>
                   )}
-                  {hasSavedStatements && transactions.length === 0 && (
+                  {hasSavedStatements && activeTransactions.length === 0 && (
                     <span className="text-slate-500 dark:text-slate-400 font-normal">
                       {' '}(Carried over from {savedStatements.length} saved statement{savedStatements.length > 1 ? 's' : ''}, already applied)
                     </span>
@@ -941,9 +946,9 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <button
               type="button"
               onClick={() => onResetAllCreditOverrides?.()}
-              disabled={transactions.length === 0}
+              disabled={activeTransactions.length === 0}
               className="px-3 py-1.5 text-xs font-semibold rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors flex items-center gap-1.5 border border-slate-200 dark:border-slate-700 disabled:opacity-40"
-              title={transactions.length === 0 ? "Load active statement to adjust" : "Reset active buckets to auto-calculated transaction credit sum"}
+              title={activeTransactions.length === 0 ? "Load active statement to adjust" : "Reset active buckets to auto-calculated transaction credit sum"}
             >
               <RotateCcw className="w-3.5 h-3.5 text-slate-500" />
               Auto from Txns
@@ -993,7 +998,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   Carried-Over Statement History ({savedStatements.length} Saved):
                 </span>{' '}
                 <span>
-                  {transactions.length === 0 ? (
+                  {activeTransactions.length === 0 ? (
                     <>
                       Totals and credit allocations ({formatCurrency(carriedOverTotals.totalAllocatedCredit)} credits applied, {formatCurrency(carriedOverTotals.totalNetSpend)} net spend) are <strong>already applied</strong>. When you load your next statement above, its numbers will directly account for these totals.
                     </>
@@ -1005,7 +1010,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
               </div>
             </div>
-            {transactions.length > 0 && (
+            {activeTransactions.length > 0 && (
               <div className="text-[11px] font-bold text-indigo-700 dark:text-indigo-300 shrink-0">
                 Combined Accounted Net: {formatCurrency(effectiveTotals.totalNet)}
               </div>
@@ -1031,7 +1036,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
               ) : (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                  {hasSavedStatements && transactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
+                  {hasSavedStatements && activeTransactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
                 </span>
               )}
             </div>
@@ -1042,7 +1047,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="font-bold text-slate-800 dark:text-slate-200">
                   {formatCurrency(effectiveTotals.andrewGross)}
                 </span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                     Carried: {formatCurrency(carriedOverTotals.andrew.debit)} + Active: {formatCurrency(andrewGross)}
                   </div>
@@ -1053,7 +1058,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="font-medium text-slate-600 dark:text-slate-400">
                   {formatCurrency(effectiveTotals.andrewAutoCredit)}
                 </span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                     Carried: {formatCurrency(carriedOverTotals.andrew.credit)} + Active: {formatCurrency(andrewSummary?.totalCredit || 0)}
                   </div>
@@ -1065,7 +1070,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                 <span>Credit Offset Applied:</span>
-                {andrewSummary?.isCreditOverridden && transactions.length > 0 && (
+                {andrewSummary?.isCreditOverridden && activeTransactions.length > 0 && (
                   <button
                     type="button"
                     onClick={() => onUpdateCreditOverride?.('Andrew', null, false)}
@@ -1130,7 +1135,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               ) : (
                 <div
                   onClick={() => {
-                    if (transactions.length === 0 && hasSavedStatements) {
+                    if (activeTransactions.length === 0 && hasSavedStatements) {
                       alert("Credit allocations from saved statements are locked and applied. To adjust them, reopen the statement from the Saved Statements panel below, or load your next statement to allocate credits.");
                       return;
                     }
@@ -1142,7 +1147,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
                       -{formatCurrency(effectiveTotals.andrewAllocatedCredit)}
                     </span>
-                    {transactions.length > 0 ? (
+                    {activeTransactions.length > 0 ? (
                       <span className="text-[10px] text-slate-400 group-hover:text-indigo-600 dark:group-hover:text-indigo-400 font-semibold flex items-center gap-1">
                         <Edit3 className="w-3 h-3" /> Edit Active
                       </span>
@@ -1152,7 +1157,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                     )}
                   </div>
-                  {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                     <div className="text-[10px] text-emerald-700 dark:text-emerald-400/90 mt-0.5">
                       Carried: -{formatCurrency(carriedOverTotals.andrew.allocatedCredit)} + Active: -{formatCurrency(andrewAllocatedCredit)}
                     </div>
@@ -1168,7 +1173,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   id="auto-apply-andrew-btn"
                   onClick={() => handleAutoApplyUnapplied('Andrew')}
-                  disabled={transactions.length === 0}
+                  disabled={activeTransactions.length === 0}
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold bg-purple-50 hover:bg-purple-100 dark:bg-purple-950/60 dark:hover:bg-purple-900/60 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800 transition-all shadow-2xs hover:shadow-xs active:scale-[0.99] cursor-pointer group"
                   title={`Auto-apply ${formatCurrency(unappliedToApply)} of unapplied money to Andrew/Natalie`}
                 >
@@ -1185,7 +1190,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   id="auto-apply-andrew-btn"
                   onClick={() => handleAutoApplyUnapplied('Andrew')}
-                  disabled={transactions.length === 0}
+                  disabled={activeTransactions.length === 0}
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 transition-all shadow-2xs hover:shadow-xs active:scale-[0.99] cursor-pointer"
                   title={`Subtract ${formatCurrency(Math.abs(unappliedToApply))} over-allocated credit from Andrew/Natalie to reconcile`}
                 >
@@ -1218,7 +1223,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="p-2.5 rounded-lg bg-purple-50/60 dark:bg-purple-950/40 border border-purple-100 dark:border-purple-900/60 flex items-center justify-between">
               <div>
                 <span className="text-xs text-purple-900 dark:text-purple-300 font-semibold block">Net Spend:</span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <span className="text-[10px] text-purple-700/80 dark:text-purple-300/80 block">
                     Carried: {formatCurrency(carriedOverTotals.andrew.netSpend)} + Active: {formatCurrency(andrewNet)}
                   </span>
@@ -1250,7 +1255,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
               ) : (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                  {hasSavedStatements && transactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
+                  {hasSavedStatements && activeTransactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
                 </span>
               )}
             </div>
@@ -1261,7 +1266,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="font-bold text-slate-800 dark:text-slate-200">
                   {formatCurrency(effectiveTotals.rachelGross)}
                 </span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                     Carried: {formatCurrency(carriedOverTotals.rachel.debit)} + Active: {formatCurrency(rachelGross)}
                   </div>
@@ -1272,7 +1277,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="font-medium text-slate-600 dark:text-slate-400">
                   {formatCurrency(effectiveTotals.rachelAutoCredit)}
                 </span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                     Carried: {formatCurrency(carriedOverTotals.rachel.credit)} + Active: {formatCurrency(rachelSummary?.totalCredit || 0)}
                   </div>
@@ -1284,7 +1289,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                 <span>Credit Offset Applied:</span>
-                {rachelSummary?.isCreditOverridden && transactions.length > 0 && (
+                {rachelSummary?.isCreditOverridden && activeTransactions.length > 0 && (
                   <button
                     type="button"
                     onClick={() => onUpdateCreditOverride?.('Rachel', null, false)}
@@ -1349,7 +1354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               ) : (
                 <div
                   onClick={() => {
-                    if (transactions.length === 0 && hasSavedStatements) {
+                    if (activeTransactions.length === 0 && hasSavedStatements) {
                       alert("Credit allocations from saved statements are locked and applied. To adjust them, reopen the statement from the Saved Statements panel below, or load your next statement to allocate credits.");
                       return;
                     }
@@ -1361,7 +1366,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
                       -{formatCurrency(effectiveTotals.rachelAllocatedCredit)}
                     </span>
-                    {transactions.length > 0 ? (
+                    {activeTransactions.length > 0 ? (
                       <span className="text-[10px] text-slate-400 group-hover:text-pink-600 dark:group-hover:text-pink-400 font-semibold flex items-center gap-1">
                         <Edit3 className="w-3 h-3" /> Edit Active
                       </span>
@@ -1371,7 +1376,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                     )}
                   </div>
-                  {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                     <div className="text-[10px] text-emerald-700 dark:text-emerald-400/90 mt-0.5">
                       Carried: -{formatCurrency(carriedOverTotals.rachel.allocatedCredit)} + Active: -{formatCurrency(rachelAllocatedCredit)}
                     </div>
@@ -1387,7 +1392,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   id="auto-apply-rachel-btn"
                   onClick={() => handleAutoApplyUnapplied('Rachel')}
-                  disabled={transactions.length === 0}
+                  disabled={activeTransactions.length === 0}
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold bg-pink-50 hover:bg-pink-100 dark:bg-pink-950/60 dark:hover:bg-pink-900/60 text-pink-700 dark:text-pink-300 border border-pink-200 dark:border-pink-800 transition-all shadow-2xs hover:shadow-xs active:scale-[0.99] cursor-pointer group"
                   title={`Auto-apply ${formatCurrency(unappliedToApply)} of unapplied money to Rachel`}
                 >
@@ -1404,7 +1409,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   id="auto-apply-rachel-btn"
                   onClick={() => handleAutoApplyUnapplied('Rachel')}
-                  disabled={transactions.length === 0}
+                  disabled={activeTransactions.length === 0}
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 transition-all shadow-2xs hover:shadow-xs active:scale-[0.99] cursor-pointer"
                   title={`Subtract ${formatCurrency(Math.abs(unappliedToApply))} over-allocated credit from Rachel to reconcile`}
                 >
@@ -1437,7 +1442,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="p-2.5 rounded-lg bg-pink-50/60 dark:bg-pink-950/40 border border-pink-100 dark:border-pink-900/60 flex items-center justify-between">
               <div>
                 <span className="text-xs text-pink-900 dark:text-pink-300 font-semibold block">Net Spend:</span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <span className="text-[10px] text-pink-700/80 dark:text-pink-300/80 block">
                     Carried: {formatCurrency(carriedOverTotals.rachel.netSpend)} + Active: {formatCurrency(rachelNet)}
                   </span>
@@ -1472,7 +1477,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </span>
               ) : (
                 <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400">
-                  {hasSavedStatements && transactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
+                  {hasSavedStatements && activeTransactions.length === 0 ? 'Carried Applied' : 'Auto from Txns'}
                 </span>
               )}
             </div>
@@ -1483,7 +1488,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="font-bold text-slate-800 dark:text-slate-200">
                   {formatCurrency(effectiveTotals.leisureGross)}
                 </span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                     Carried: {formatCurrency(carriedOverTotals.leisure.debit)} + Active: {formatCurrency(leisureGross)}
                   </div>
@@ -1494,7 +1499,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 <span className="font-medium text-slate-600 dark:text-slate-400">
                   {formatCurrency(effectiveTotals.leisureAutoCredit)}
                 </span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <div className="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">
                     Carried: {formatCurrency(carriedOverTotals.leisure.credit)} + Active: {formatCurrency(leisureSummary?.totalCredit || 0)}
                   </div>
@@ -1506,7 +1511,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="space-y-1.5">
               <label className="text-[11px] font-semibold text-slate-700 dark:text-slate-300 flex items-center justify-between">
                 <span>Credit Offset Applied:</span>
-                {leisureSummary?.isCreditOverridden && transactions.length > 0 && (
+                {leisureSummary?.isCreditOverridden && activeTransactions.length > 0 && (
                   <button
                     type="button"
                     onClick={() => onUpdateCreditOverride?.('Leisure', null, true)}
@@ -1636,7 +1641,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
               ) : (
                 <div
                   onClick={() => {
-                    if (transactions.length === 0 && hasSavedStatements) {
+                    if (activeTransactions.length === 0 && hasSavedStatements) {
                       alert("Credit allocations from saved statements are locked and applied. To adjust them, reopen the statement from the Saved Statements panel below, or load your next statement to allocate credits.");
                       return;
                     }
@@ -1648,7 +1653,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     <span className="font-extrabold text-sm text-emerald-600 dark:text-emerald-400">
                       -{formatCurrency(effectiveTotals.leisureAllocatedCredit)}
                     </span>
-                    {transactions.length > 0 ? (
+                    {activeTransactions.length > 0 ? (
                       <span className="text-[10px] text-slate-400 group-hover:text-sky-600 dark:group-hover:text-sky-400 font-semibold flex items-center gap-1">
                         <Edit3 className="w-3 h-3" /> Edit Active
                       </span>
@@ -1658,7 +1663,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                       </span>
                     )}
                   </div>
-                  {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                  {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                     <div className="text-[10px] text-emerald-700 dark:text-emerald-400/90 mt-0.5">
                       Carried: -{formatCurrency(carriedOverTotals.leisure.allocatedCredit)} + Active: -{formatCurrency(leisureAllocatedCredit)}
                     </div>
@@ -1680,7 +1685,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                     key={amt}
                     type="button"
                     onClick={() => handleTransferCreditToLeisure(amt)}
-                    disabled={transactions.length === 0}
+                    disabled={activeTransactions.length === 0}
                     className="py-1 px-1.5 text-center text-[11px] font-bold rounded-lg bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/70 dark:hover:bg-sky-900/80 text-sky-700 dark:text-sky-200 border border-sky-200 dark:border-sky-800 transition-colors shadow-2xs hover:shadow-xs active:scale-95 cursor-pointer disabled:opacity-50"
                     title={`Add +$${amt} to Leisure and deduct -$${amt} from Andrew/Natalie`}
                   >
@@ -1697,7 +1702,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   id="auto-apply-leisure-btn"
                   onClick={() => handleAutoApplyUnapplied('Leisure')}
-                  disabled={transactions.length === 0}
+                  disabled={activeTransactions.length === 0}
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/60 dark:hover:bg-sky-900/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 transition-all shadow-2xs hover:shadow-xs active:scale-[0.99] cursor-pointer group"
                   title={`Auto-apply ${formatCurrency(unappliedToApply)} of unapplied money to Leisure`}
                 >
@@ -1714,7 +1719,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                   type="button"
                   id="auto-apply-leisure-btn"
                   onClick={() => handleAutoApplyUnapplied('Leisure')}
-                  disabled={transactions.length === 0}
+                  disabled={activeTransactions.length === 0}
                   className="w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-bold bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/60 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-800 transition-all shadow-2xs hover:shadow-xs active:scale-[0.99] cursor-pointer"
                   title={`Subtract ${formatCurrency(Math.abs(unappliedToApply))} over-allocated credit from Leisure to reconcile`}
                 >
@@ -1747,7 +1752,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
             <div className="p-2.5 rounded-lg bg-sky-50/60 dark:bg-sky-950/40 border border-sky-100 dark:border-sky-900/60 flex items-center justify-between">
               <div>
                 <span className="text-xs text-sky-900 dark:text-sky-300 font-semibold block">Net Spend:</span>
-                {hasSavedStatements && transactions.length > 0 && displayScope !== 'active' && (
+                {hasSavedStatements && activeTransactions.length > 0 && displayScope !== 'active' && (
                   <span className="text-[10px] text-sky-700/80 dark:text-sky-300/80 block">
                     Carried: {formatCurrency(carriedOverTotals.leisure.netSpend)} + Active: {formatCurrency(leisureNet)}
                   </span>
@@ -2107,7 +2112,7 @@ export const Dashboard: React.FC<DashboardProps> = ({
                 </h3>
               </div>
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {transactions.length} Total Txns
+                {activeTransactions.length} Active Txns
               </span>
             </div>
 
