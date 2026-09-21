@@ -66,7 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </a>
           <div>
             <span className="font-black text-slate-900 dark:text-white tracking-tight text-base sm:text-lg">
-              Credit Card <span className="text-indigo-600 dark:text-indigo-400">Analyzer</span>
+              Card<span className="text-indigo-600 dark:text-indigo-400">Settle</span>
             </span>
           </div>
         </div>

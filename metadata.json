@@ -1,5 +1,5 @@
 {
-  "name": "Credit Card Analyzer",
+  "name": "CardSettle",
   "description": "Import credit card CSV/PDF transactions, auto-categorize between Andrew, Rachel, and Leisure, directly apply credits to individuals, and analyze spending with real-time dashboards.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
